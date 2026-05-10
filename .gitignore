@@ -5,3 +5,5 @@ venv/
 *.wav
 *.json
 !DESIGN.md
+.claude/settings.json
+output/
