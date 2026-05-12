@@ -6,7 +6,7 @@ venv/
 *.json
 !DESIGN.md
 .claude/settings.json
-output/
+output*/
 .DS_Store
 *.png
 .vscode/

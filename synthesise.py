@@ -37,6 +37,19 @@ def remap_tier_a(transcript: dict, resample_ratio: float) -> dict:
     return result
 
 
+def fill_null_segment_times(transcript: dict) -> None:
+    for seg in transcript.get("segments", []):
+        words = seg.get("words", [])
+        if seg["startTime"] is None:
+            starts = [w["startTime"] for w in words if w.get("startTime") is not None]
+            if starts:
+                seg["startTime"] = min(starts)
+        if seg["endTime"] is None:
+            ends = [w["endTime"] for w in words if w.get("endTime") is not None]
+            if ends:
+                seg["endTime"] = max(ends)
+
+
 def tag_speaker(transcript: dict, speaker: str) -> None:
     for seg in transcript.get("segments", []):
         seg["speaker"] = speaker
@@ -119,6 +132,9 @@ def process_session(
 
     tx_ref_aligned = copy.deepcopy(tx_ref)
     tx_tgt_aligned = remap_tier_a(tx_tgt, resample_ratio)
+
+    fill_null_segment_times(tx_ref_aligned)
+    fill_null_segment_times(tx_tgt_aligned)
 
     reference_duration = n_ref / sr_ref
     for tx in (tx_ref_aligned, tx_tgt_aligned):
