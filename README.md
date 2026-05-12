@@ -16,17 +16,15 @@ classifies each session by correction tier, and writes per-session parameter fil
 and a corpus-level summary. No audio is produced.
 
 **Stage 2 — Synthesis (`synthesise.py`)**: reads the parameter files from Stage 1
-and produces, for each session, a mixed stereo WAV and corrected transcript files.
+and produces, for each Tier A session, a mixed stereo WAV and corrected transcript
+files. Tier B and Tier C support is not yet implemented.
 
 See [DESIGN.md](DESIGN.md) for full design documentation.
 
 ## Dependencies
 
 ```
-librosa
-soundfile
-numpy
-scipy
+librosa, resampy, soundfile, numpy, scipy, matplotlib
 ```
 
 Install with:
@@ -37,8 +35,18 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
+# Stage 1: measure drift and write parameter files
 python analyse.py --corpus-root /path/to/spjallromur --output-root /path/to/output
+
+# Stage 2: produce mixed WAV and aligned transcripts (Tier A sessions)
 python synthesise.py --corpus-root /path/to/spjallromur --output-root /path/to/output
+
+# Process a specific subset of sessions
+python synthesise.py --corpus-root /path/to/spjallromur --output-root /path/to/output \
+    --sessions 2a07b3a7,01119679
+
+# Inspect outlier sessions (plots RMS envelopes to output/inspection/)
+python inspect_outliers.py --corpus-root /path/to/spjallromur --output-root /path/to/output
 ```
 
 ## Outputs
