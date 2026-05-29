@@ -7,10 +7,25 @@ import sys
 
 import soundfile as sf
 
+# Sessions where the WAV header reports an incorrect sample rate.
+# Key: session_id, Value: true recorded sample rate in Hz.
+SAMPLE_RATE_OVERRIDES = {
+    "198f2863": 12000,  # header says 16000 Hz; audio was recorded at 12000 Hz
+}
+
+# Sessions excluded from pipeline output due to bad audio quality.
+# analyse.py writes a session_params.json with status=excluded; synthesise.py skips them.
+EXCLUDED_SESSIONS = {
+    "198f2863": (
+        "audio recording quality too poor to mix — "
+        "multiple voices, severe audio artefacts, and probable sample rate mismatch"
+    ),
+}
+
 
 def propose_thresholds(drifts):
     """Propose tier boundaries from the drift distribution using the largest-gap method."""
-    inspection_max = 5.0  # per DESIGN.md: > 5% flagged for manual inspection
+    inspection_max = 5.0
     below = sorted(d for d in drifts if 0 < d < inspection_max)
 
     if len(below) < 3:
@@ -26,7 +41,6 @@ def propose_thresholds(drifts):
         reverse=True,
     )
 
-    # Mid-points of the two largest gaps give natural tier boundaries.
     breaks = sorted(round((lo + hi) / 2, 3) for _, lo, hi in gaps[:2])
     tier_a_max = breaks[0]
     tier_b_max = breaks[1] if len(breaks) > 1 else inspection_max
@@ -34,13 +48,13 @@ def propose_thresholds(drifts):
     top_gap = gaps[0]
     second_gap = gaps[1] if len(gaps) > 1 else None
     rationale = (
-        f"Tier A / Tier B boundaries proposed at natural gaps in sorted drift distribution "
+        f"Tier A / Tier B boundaries at natural gaps in sorted drift distribution "
         f"(largest gap: {round(top_gap[0], 3)}% at {top_gap[1]:.3f}→{top_gap[2]:.3f}"
         + (
             f", second gap: {round(second_gap[0], 3)}% at {second_gap[1]:.3f}→{second_gap[2]:.3f}"
             if second_gap else ""
         )
-        + f"). Sessions with drift > {inspection_max}% are flagged for manual inspection."
+        + f"). Informational only — all sessions are processed regardless of drift magnitude."
     )
     return {
         "tier_a_max": tier_a_max,
@@ -50,12 +64,13 @@ def propose_thresholds(drifts):
     }
 
 
-def find_session_pairs(corpus_root: Path):
+def find_session_pairs(corpus_root: Path) -> dict:
+    """Find sessions with both WAV files under full_conversations/ in corpus_root."""
     sessions = {}
     for wav_path in corpus_root.rglob("speaker_*_convo_*.wav"):
-        name = wav_path.name
-        if not name.startswith("speaker_") or not name.endswith(".wav"):
+        if "full_conversations" not in wav_path.parts:
             continue
+        name = wav_path.name
         parts = name.split("_convo_")
         if len(parts) != 2:
             continue
@@ -68,11 +83,20 @@ def find_session_pairs(corpus_root: Path):
     return sessions
 
 
-def duration_seconds(wav_path: Path) -> float:
+def duration_seconds(wav_path: Path, session_id: str = None) -> float:
+    """Return duration in seconds, applying sample-rate override if needed."""
     info = sf.info(str(wav_path))
     if info.samplerate <= 0:
         raise ValueError(f"Invalid samplerate in {wav_path}")
-    return float(info.frames) / float(info.samplerate)
+    actual_sr = SAMPLE_RATE_OVERRIDES.get(session_id, info.samplerate)
+    if actual_sr != info.samplerate:
+        print(
+            f"  [{session_id}] Sample rate override: header={info.samplerate} Hz, "
+            f"actual={actual_sr} Hz — duration corrected from "
+            f"{info.frames/info.samplerate:.3f}s to {info.frames/actual_sr:.3f}s",
+            file=sys.stderr,
+        )
+    return float(info.frames) / float(actual_sr)
 
 
 def write_session_params(output_dir: Path, session_id: str, params: dict):
@@ -89,7 +113,7 @@ def format_seconds(value: float) -> str:
 
 
 def print_summary(rows):
-    headers = ["session_id", "dur_a(s)", "dur_b(s)", "delta(s)", "drift(%)", "ref"]
+    headers = ["session_id", "dur_a(s)", "dur_b(s)", "delta(s)", "drift(%)", "ref", ">1%"]
     widths = [max(len(str(row[i])) for row in rows + [headers]) for i in range(len(headers))]
     line = "  ".join(header.ljust(widths[i]) for i, header in enumerate(headers))
     print(line)
@@ -99,8 +123,11 @@ def print_summary(rows):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Stage 1 analysis: measure session durations and create parameter stubs.")
-    parser.add_argument("--corpus-root", required=True, help="Path to the corpus root containing session directories.")
+    parser = argparse.ArgumentParser(
+        description="Stage 1 analysis: measure session durations and create parameter stubs."
+    )
+    parser.add_argument("--corpus-root", required=True, help="Path to the CLARIN corpus root (contains WAV files).")
+    parser.add_argument("--transcript-root", default=None, help="Path to the v2 transcript root (for documentation; not used for filtering).")
     parser.add_argument("--output-root", required=True, help="Path to the output root where session parameter files are written.")
     args = parser.parse_args()
 
@@ -111,6 +138,12 @@ def main():
         print(f"Error: corpus root not found or not a directory: {corpus_root}", file=sys.stderr)
         sys.exit(1)
 
+    if args.transcript_root:
+        transcript_root = Path(args.transcript_root).expanduser().resolve()
+        if not transcript_root.exists() or not transcript_root.is_dir():
+            print(f"Error: transcript root not found or not a directory: {transcript_root}", file=sys.stderr)
+            sys.exit(1)
+
     sessions = find_session_pairs(corpus_root)
     if not sessions:
         print(f"No valid session WAV pairs found under {corpus_root}", file=sys.stderr)
@@ -119,19 +152,37 @@ def main():
     summary_rows = []
     session_records = []
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
     for session_id, wavs in sorted(sessions.items()):
         if "a" not in wavs or "b" not in wavs:
             print(f"Skipping session {session_id}: missing speaker_a or speaker_b WAV", file=sys.stderr)
             continue
 
+        if session_id in EXCLUDED_SESSIONS:
+            reason = EXCLUDED_SESSIONS[session_id]
+            print(f"[{session_id}] Excluded: {reason}")
+            output_dir = output_root / session_id
+            write_session_params(output_dir, session_id, {
+                "session_id": session_id,
+                "status": "excluded",
+                "exclusion_reason": reason,
+                "pipeline_version": "1.0.0",
+                "stage1_timestamp": timestamp,
+            })
+            continue
+
         path_a = wavs["a"]
         path_b = wavs["b"]
-        duration_a = duration_seconds(path_a)
-        duration_b = duration_seconds(path_b)
+        duration_a = duration_seconds(path_a, session_id)
+        duration_b = duration_seconds(path_b, session_id)
         delta = abs(duration_a - duration_b)
         reference_channel = "a" if duration_a >= duration_b else "b"
         reference_duration = max(duration_a, duration_b)
         drift_percent = (delta / reference_duration) * 100 if reference_duration > 0 else 0.0
+        above_1pct = drift_percent > 1.0
+
+        corrected_sr = session_id in SAMPLE_RATE_OVERRIDES
+        original_sr = SAMPLE_RATE_OVERRIDES.get(session_id)
 
         params = {
             "session_id": session_id,
@@ -139,9 +190,13 @@ def main():
             "duration_b_sec": round(duration_b, 6),
             "delta_sec": round(delta, 6),
             "drift_percent": round(drift_percent, 6),
+            "above_1pct_threshold": above_1pct,
             "reference_channel": reference_channel,
-            "tier": None,
-            "correction": None,
+            "tier": "A",
+            "resample_ratio": None,
+            "transcript_source": None,
+            "corrected_sample_rate": corrected_sr,
+            "original_sample_rate": original_sr,
             "pipeline_version": "1.0.0",
             "stage1_timestamp": timestamp,
         }
@@ -155,6 +210,7 @@ def main():
             "duration_b_sec": params["duration_b_sec"],
             "delta_sec": params["delta_sec"],
             "drift_percent": params["drift_percent"],
+            "above_1pct_threshold": above_1pct,
             "tier": params["tier"],
         })
 
@@ -165,6 +221,7 @@ def main():
             format_seconds(delta),
             f"{drift_percent:.3f}",
             reference_channel,
+            "YES" if above_1pct else "",
         ])
 
     if summary_rows:
@@ -179,11 +236,6 @@ def main():
     variance = sum((d - mean_drift) ** 2 for d in drifts) / n
     std_drift = variance ** 0.5
 
-    tier_counts: dict[str, int] = {}
-    for r in session_records:
-        key = r["tier"] if r["tier"] is not None else "null"
-        tier_counts[key] = tier_counts.get(key, 0) + 1
-
     corpus_summary = {
         "pipeline_version": "1.0.0",
         "timestamp": timestamp,
@@ -193,8 +245,8 @@ def main():
             "mean_drift_percent": round(mean_drift, 6),
             "std_drift_percent": round(std_drift, 6),
             "max_drift_percent": round(max(drifts), 6),
+            "sessions_above_1pct": sum(1 for r in session_records if r["above_1pct_threshold"]),
         },
-        "tier_counts": tier_counts,
         "proposed_thresholds": propose_thresholds(drifts),
     }
 

@@ -34,19 +34,32 @@ pip install -r requirements.txt
 
 ## Usage
 
+The pipeline uses two separate input roots:
+- `--corpus-root`: the original CLARIN release (WAV files)
+- `--transcript-root`: the v2 GitHub release (forced-alignment JSON files)
+
 ```bash
 # Stage 1: measure drift and write parameter files
-python analyse.py --corpus-root /path/to/spjallromur --output-root /path/to/output
+python analyse.py \
+    --corpus-root /path/to/clarin/spjallromur \
+    --transcript-root /path/to/spjallromur-v2 \
+    --output-root /path/to/output
 
 # Stage 2: produce mixed WAV and aligned transcripts (Tier A sessions)
-python synthesise.py --corpus-root /path/to/spjallromur --output-root /path/to/output
+python synthesise.py \
+    --corpus-root /path/to/clarin/spjallromur \
+    --transcript-root /path/to/spjallromur-v2 \
+    --output-root /path/to/output
 
 # Process a specific subset of sessions
-python synthesise.py --corpus-root /path/to/spjallromur --output-root /path/to/output \
+python synthesise.py \
+    --corpus-root /path/to/clarin/spjallromur \
+    --transcript-root /path/to/spjallromur-v2 \
+    --output-root /path/to/output \
     --sessions 2a07b3a7,01119679
 
 # Inspect outlier sessions (plots RMS envelopes to output/inspection/)
-python inspect_outliers.py --corpus-root /path/to/spjallromur --output-root /path/to/output
+python inspect_outliers.py --corpus-root /path/to/clarin/spjallromur --output-root /path/to/output
 ```
 
 ## Outputs

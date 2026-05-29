@@ -44,103 +44,89 @@ blindly on any session for which a valid parameter file exists.
 
 ## Directory Structure
 
-### Input (source corpus, read-only)
+### Audio input (`--corpus-root`, CLARIN release, read-only)
+
+WAV files only. Both `full_conversations` and `half_conversations` exist under
+this root; the pipeline processes `full_conversations` only.
 
 ```
 <corpus_root>/spjallromur/data/full_conversations/
     <session_id>/
         speaker_a_convo_<session_id>.wav
         speaker_b_convo_<session_id>.wav
-        speaker_a_convo_<session_id>_transcript.json
-        speaker_b_convo_<session_id>_transcript.json
 ```
 
-### Output (mirrors source structure)
+### Transcript input (`--transcript-root`, v2 aligned release, read-only)
+
+Word-level forced-alignment JSON files. Age and gender suffixes vary per speaker;
+files are discovered by globbing `a_<session_id>_*.json` and `b_<session_id>_*.json`
+within each session folder.
+
+```
+<transcript_root>/full_conversations/
+    <session_id>/
+        a_<session_id>_<age>_<gender>.json
+        b_<session_id>_<age>_<gender>.json
+```
+
+### Output
 
 ```
 <output_root>/
-    corpus_summary.json
+    corpus_summary.json                                          ← written by Stage 1
     <session_id>/
-        session_params.json                                      ← written by Stage 1
-        <session_id>_mixed.wav                                   ← written by Stage 2
-        speaker_a_convo_<session_id>_transcript_aligned.json     ← Stage 2
-        speaker_b_convo_<session_id>_transcript_aligned.json     ← Stage 2
+        session_params.json                                      ← Stage 1
+        <session_id>_mixed.wav                                   ← Stage 2
+        a_<session_id>_<age>_<gender>_aligned.json               ← Stage 2
+        b_<session_id>_<age>_<gender>_aligned.json               ← Stage 2
         <session_id>_transcript_merged.json                      ← Stage 2
 ```
 
 ---
 
-## Drift Model and Session Classification
+## Drift Model
 
-Stage 1 classifies each session into one of three tiers based on the measured drift
-characteristics. Tier thresholds are not hard-coded: Stage 1 computes the
-distribution of drift magnitudes across all sessions and proposes thresholds based
-on that distribution (e.g. at natural breaks in the sorted `Tper` values). The
-proposed thresholds are recorded in `corpus_summary.json` and can be overridden
-manually before running Stage 2.
+All sessions are processed using a single linear resample (Tier A), regardless of
+drift magnitude. The shorter channel is resampled to match the length of the longer
+channel using a single linear stretch factor:
 
-### Tier A — Simple resample
+**Correction parameter:** `resample_ratio = len_longer_samples / len_shorter_samples`
 
-The two channels differ only in total length, with the start assumed to be aligned.
-The shorter channel is resampled to match the length of the longer channel using a
-single linear stretch factor.
-
-**Correction parameter:** `resample_ratio = len_longer / len_shorter`
-
-Applicable when drift is small and uniform (expected: the majority of sessions).
-
-### Tier B — Shift + resample
-
-The shorter channel appears to start at a slight offset relative to the longer, in
-addition to a uniform drift. A zero-padding offset is applied at the start (or end)
-before the linear resample.
-
-**Correction parameters:** `start_offset_samples` (zero-padding at start of shorter
-channel), then `resample_ratio` applied to the padded signal.
-
-The start offset is estimated by cross-correlating the energy envelopes of the two
-channels over the first 60 seconds of the recording.
-
-### Tier C — Piecewise-linear warp
-
-The drift is non-linear or shows evidence of discontinuities. A piecewise-linear
-time map is estimated by dividing the recording into N equal segments, computing a
-local shift estimate per segment using energy-envelope cross-correlation, and fitting
-a monotone piecewise-linear function through the resulting anchor points.
-
-**Correction parameters:** a list of `(t_in, t_out)` anchor pairs defining the
-warp function. Audio resampling is applied segment-by-segment using the local
-stretch ratio for each segment.
-
-N (number of segments) is a configurable parameter, defaulting to 10.
+Stage 1 computes natural gap thresholds in the drift distribution and records them
+in `corpus_summary.json` as `proposed_thresholds`. These are **informational only**
+and do not gate processing. The `above_1pct_threshold` flag in each
+`session_params.json` marks sessions where drift exceeds 1% so that reviewers can
+inspect those sessions without any being silently dropped.
 
 ---
 
 ## Per-Session Parameter File (`session_params.json`)
 
+Written by Stage 1; updated by Stage 2 with `resample_ratio` and `transcript_source`.
+
 ```json
 {
   "session_id": "2a07b3a7",
-  "duration_a_sec": 978.924,
-  "duration_b_sec": 973.143,
-  "delta_sec": 5.781,
-  "drift_percent": 0.593,
-  "reference_channel": "a",
+  "duration_a_sec": 985.868,
+  "duration_b_sec": 984.331,
+  "delta_sec": 1.537,
+  "drift_percent": 0.156,
+  "above_1pct_threshold": false,
+  "reference_channel": "b",
   "tier": "A",
-  "correction": {
-    "resample_ratio": 1.00594
-  },
+  "resample_ratio": 1.00156138,
+  "transcript_source": "v2",
+  "corrected_sample_rate": false,
+  "original_sample_rate": null,
   "pipeline_version": "1.0.0",
-  "stage1_timestamp": "2026-05-10T12:00:00Z"
+  "stage1_timestamp": "2026-05-13T00:00:00Z"
 }
 ```
 
-For Tier B, `correction` additionally contains `start_offset_samples`.
-For Tier C, `correction` contains `anchor_points: [[t_in, t_out], ...]` and
-`n_segments`.
-
-The `reference_channel` field records which channel is treated as the time
-reference (always the longer one). The other channel is warped to match it.
+`reference_channel` is always the longer channel; the other is the target and is
+resampled. `above_1pct_threshold` is informational only — all sessions are processed
+regardless. `corrected_sample_rate` and `original_sample_rate` are set only for
+sessions with a known WAV header anomaly (see Known Session Anomalies below).
 
 ---
 
@@ -148,13 +134,8 @@ reference (always the longer one). The other channel is warped to match it.
 
 The **longer channel is always the reference**; its audio and timestamps are
 unchanged. The **shorter channel is always the target**; it is warped to match the
-reference timeline.
-
-This is a documented convention, not a physical necessity. It is chosen because it
-avoids truncating any content and requires remapping only one transcript. If the
-length difference is implausibly large (currently: > 5% of total duration), Stage 1
-flags the session for manual inspection rather than classifying it automatically,
-since a gap that large suggests a recording fault rather than clock drift.
+reference timeline. This avoids truncating any content and requires remapping only
+one transcript.
 
 Both corrected transcripts share the same absolute timeline as the mixed stereo WAV.
 
@@ -186,17 +167,50 @@ For each session, Stage 2 executes the following steps in order:
 
 ## Transcript Remapping and Speaker Tagging
 
+### Transcript sources and fallback
+
+Stage 2 tries to load the v2 forced-alignment transcript for each speaker from
+`--transcript-root/full_conversations/<session_id>/`. If no v2 file is found (e.g.
+sessions not included in the v2 release), it falls back to the CLARIN transcript at
+`--corpus-root/.../full_conversations/<session_id>/speaker_{a|b}_convo_<session_id>_transcript.json`.
+
+The CLARIN format uses a `segments` → `words` hierarchy with `startTime`/`endTime`
+keys. The fallback reader flattens this into the same word-list format used by v2
+(with `start`/`end` keys), so the rest of the pipeline is format-agnostic.
+`norm_word` is set to `null` for CLARIN-sourced words (no normalised form available).
+
+The `transcript_source` field in `session_params.json` records which source was used
+(`"v2"` or `"clarin"`). Output aligned transcript filenames follow the v2 convention
+(`a_<session_id>_<age>_<gender>_aligned.json`) when source is v2, and
+`a_<session_id>_aligned.json` when source is CLARIN.
+
+### Transcript format (v2)
+
+The v2 transcript JSON files contain a flat word list with forced-alignment
+timestamps, with no segment grouping:
+
+```json
+{
+  "metadata": {
+    "age": "40-49",
+    "gender": "female",
+    "audio_duration": 664.704,
+    "speaker": "a"
+  },
+  "words": [
+    { "word": "Þá", "norm_word": "þá", "start": 2.1, "end": 2.37 },
+    ...
+  ]
+}
+```
+
 ### Per-speaker aligned transcripts
 
-Both the segment-level and word-level `startTime` and `endTime` fields are remapped
-in the target transcript. The reference transcript is copied unchanged except for
-`metadata.audio_file`, which is updated to point to the mixed WAV in both cases.
-`metadata.recordingDuration` is updated to the reference channel duration in both.
-
-A `"speaker"` field is added to every **segment** and every **word** object in both
-aligned transcripts, set to `"a"` or `"b"` according to the source channel. This is
-added uniformly to both transcripts (not only the target) so that the per-speaker
-files are consistent with the merged transcript.
+All `start` and `end` timestamps in the target transcript are remapped. The
+reference transcript is copied unchanged except that both receive two additional
+metadata fields: `audio_file` (pointing to the mixed WAV) and `audio_duration`
+(updated to the reference channel duration). A `"speaker"` field (`"a"` or `"b"`)
+is added to every word in both transcripts.
 
 For **Tier A**, remapping is a scalar multiplication:
 ```
@@ -214,32 +228,17 @@ Original transcript files are never modified.
 
 ### Merged transcript (`<session_id>_transcript_merged.json`)
 
-The merged transcript interleaves all segments from both aligned transcripts, sorted
-by `startTime`. Each segment and word retains its `"speaker"` field. The top-level
-structure is:
+The merged transcript interleaves all words from both aligned transcripts, sorted
+by `start` time. Each word retains its `"speaker"` field. The top-level structure is:
 
 ```json
 {
   "session_id": "2a07b3a7",
   "audio_file": "2a07b3a7_mixed.wav",
-  "recordingDuration": 978.924,
-  "languageCode": "is-IS",
-  "segments": [
-    {
-      "speaker": "a",
-      "startTime": 15.959,
-      "endTime": 18.09,
-      "words": [
-        { "speaker": "a", "startTime": 15.959, "endTime": 16.199, "word": "Hver " },
-        ...
-      ]
-    },
-    {
-      "speaker": "b",
-      "startTime": 21.632,
-      "endTime": 23.761,
-      "words": [ ... ]
-    },
+  "recording_duration": 985.868,
+  "words": [
+    { "speaker": "a", "word": "Já,", "norm_word": "já", "start": 15.959, "end": 16.199 },
+    { "speaker": "b", "word": "Ókei,", "norm_word": "ókei", "start": 21.632, "end": 21.722 },
     ...
   ]
 }
@@ -291,15 +290,13 @@ Both scripts accept:
 
 | Argument | Default | Description |
 |---|---|---|
-| `--corpus-root` | (required) | Path to source corpus root |
+| `--corpus-root` | (required) | Path to CLARIN corpus root (WAV files) |
+| `--transcript-root` | (required\*) | Path to v2 transcript root; CLARIN used as fallback |
 | `--output-root` | (required) | Path to output directory |
 | `--sessions` | all | Comma-separated list of session IDs to process |
 | `--res-type` | `kaiser_best` | librosa resampling quality |
 
-`analyse.py` additionally accepts:
-| `--n-segments` | 10 | Number of segments for Tier C piecewise estimation |
-| `--tier-a-max` | TBD | Override Tier A threshold (drift %) |
-| `--tier-b-max` | TBD | Override Tier B threshold (drift %) |
+\* Optional in `analyse.py` (not used for filtering); required in `synthesise.py`.
 
 ---
 
@@ -309,12 +306,35 @@ Both scripts accept:
 - `corpus_summary.json`
 - Per-session `session_params.json` files
 - Mixed stereo WAV files (`*_mixed.wav`)
-- Per-speaker aligned transcript JSON files (`*_transcript_aligned.json`)
+- Per-speaker aligned transcript JSON files (`*_aligned.json`)
 - Merged transcript JSON files (`*_transcript_merged.json`)
 - This `DESIGN.md`
 
 Original source WAV files and original transcript JSON files are not redistributed
 (they form part of the separately released Spjallrómur corpus).
+
+---
+
+## Known Session Anomalies
+
+### `198f2863` — excluded (bad audio quality)
+
+Session `198f2863` is excluded from pipeline output entirely. The recordings
+contain multiple voices, severe audio artefacts, and a probable sample rate
+mismatch (WAV header claims 16000 Hz; audio was likely recorded at 12000 Hz).
+The artefacts are too severe to produce a usable stereo mix.
+
+Stage 1 (`analyse.py`) still writes a `session_params.json` for this session, but
+with `"status": "excluded"` and an `"exclusion_reason"` field rather than the
+normal measurement fields. Stage 2 (`synthesise.py`) skips it with no audio or
+transcript output.
+
+### `2a139f9b` — no v2 transcript
+
+This session is present in the CLARIN release but was not included in the v2
+forced-alignment release. Stage 2 falls back to the CLARIN transcript and records
+`transcript_source: "clarin"` in `session_params.json`. The timestamps are the
+original, unverified CLARIN ones.
 
 ---
 
