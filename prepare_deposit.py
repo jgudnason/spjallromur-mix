@@ -351,13 +351,27 @@ def main():
     write_metadata_tsv(metadata_path, all_metadata)
     print(f"Written metadata.tsv ({len(all_metadata)} rows)")
 
-    # 5. code/README.txt
+    # 5. docs/manual_transcripts.json (anonymised)
+    anon_src = next(corpus_root.rglob("manual_transcripts_anon.json"), None)
+    if anon_src is not None:
+        docs_dir = deposit_root / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        copy_file(anon_src, docs_dir / "manual_transcripts.json")
+        print("Copied docs/manual_transcripts.json (anonymised)")
+    else:
+        print(
+            "  WARNING: manual_transcripts_anon.json not found under corpus-root; "
+            "run anonymise_manual_transcripts.py first",
+            file=sys.stderr,
+        )
+
+    # 6. code/README.txt
     code_dir = deposit_root / "code"
     code_dir.mkdir(parents=True, exist_ok=True)
     (code_dir / "README.txt").write_text(CODE_README_TEXT, encoding="utf-8")
     print("Written code/README.txt")
 
-    # 6. Summary
+    # 7. Summary
     print()
     print(f"Summary:")
     print(f"  Total full_conversations sessions: {stats['total']}")
