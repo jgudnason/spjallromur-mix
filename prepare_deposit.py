@@ -2,18 +2,20 @@
 """
 prepare_deposit.py — Assemble a complete CLARIN v2 deposit directory.
 
-For each full_conversations session (48 total):
-  - Copy CLARIN WAVs renamed to v2 stem (e.g. a_<sid>_20-29_m.wav)
-  - Copy v2 forced-alignment JSON transcripts where available
-  - Copy pipeline outputs: mixed WAV, aligned JSONs, merged transcript,
-    session_params.json
-  - For excluded session (198f2863): copy session_params.json only
+Directory structure mirrors the CLARIN recording structure, not the v2
+alignment outcome:
 
-For half_conversations, unaligned, splits: copy from transcript_root unchanged.
+  full_conversations/  — all 48 CLARIN full sessions (both channels recorded)
+    <session_id>/      WAVs (renamed to v2 stem) + v2 JSONs (where available)
+                       + pipeline outputs (mixed WAV, aligned JSONs, merged
+                       transcript, session_params.json)
+                       Excluded session (198f2863): session_params.json only.
 
-Top-level: copy README.md, LICENSE, evaluation_of_alignment.md.
-Create metadata.tsv with per-speaker rows and 4 pipeline columns.
-Create code/README.txt with pipeline archive instructions.
+  half_conversations/  — all 6 CLARIN half sessions (one channel only)
+    <session_id>/      WAV (renamed to v2 stem) + v2 JSON transcript
+
+Top-level: README.md, LICENSE, evaluation_of_alignment.md, metadata.tsv,
+           docs/manual_transcripts.json (anonymised), code/README.txt.
 """
 
 import argparse
@@ -25,7 +27,9 @@ from pathlib import Path
 EXCLUDED_SESSIONS = {"198f2863"}
 
 # Directories under transcript_root copied to deposit unchanged.
-PASSTHROUGH_DIRS = ("half_conversations", "unaligned", "splits", "combined", "segmented", "results", "src")
+# half_conversations and unaligned are NOT passthrough — they are rebuilt from
+# CLARIN WAVs so the deposit structure mirrors the recording structure.
+PASSTHROUGH_DIRS = ("splits", "combined", "segmented", "results", "src")
 
 # Top-level files copied from transcript_root.
 PASSTHROUGH_FILES = ("README.md", "LICENSE", "evaluation_of_alignment.md")
@@ -77,6 +81,21 @@ def find_v2_stems(transcript_root: Path, session_id: str) -> dict[str, str]:
         parts = stem.split("_")
         if len(parts) >= 4 and parts[0] in {"a", "b"} and parts[1] == session_id:
             result[parts[0]] = stem
+    return result
+
+
+def find_v2_transcript_paths(transcript_root: Path, session_id: str) -> dict[str, Path]:
+    """Return {speaker: path} for v2 JSON transcripts, searching all subdirs.
+
+    Searches the entire transcript_root so that sessions whose transcripts live
+    outside full_conversations/ (e.g. 2a139f9b, whose speakers are in
+    half_conversations/ and unaligned/) are found correctly.
+    """
+    result: dict[str, Path] = {}
+    for p in transcript_root.rglob(f"*_{session_id}_*.json"):
+        parts = p.stem.split("_")
+        if len(parts) >= 4 and parts[0] in {"a", "b"} and parts[1] == session_id:
+            result[parts[0]] = p
     return result
 
 
@@ -194,11 +213,12 @@ def process_full_conversations(
                 )
             copy_file(wav_path, session_dir / dst_name)
 
-        # Copy v2 JSON transcripts (full_conversations only).
-        v2_fc_dir = transcript_root / "full_conversations" / session_id
-        if v2_fc_dir.exists():
-            for jf in sorted(v2_fc_dir.glob("*.json")):
-                copy_file(jf, session_dir / jf.name)
+        # Copy v2 JSON transcripts — search all subdirs so that sessions whose
+        # transcripts live outside full_conversations/ (e.g. 2a139f9b) are
+        # found correctly.
+        v2_paths = find_v2_transcript_paths(transcript_root, session_id)
+        for jf in sorted(v2_paths.values()):
+            copy_file(jf, session_dir / jf.name)
 
         # Copy pipeline outputs (skip old CLARIN-style aligned filenames).
         out_dir = output_root / session_id
@@ -269,23 +289,46 @@ def _append_metadata_rows(
 
 
 # ---------------------------------------------------------------------------
-# Half conversations metadata
+# Half conversations processing
 # ---------------------------------------------------------------------------
 
-def half_conversations_metadata(
+def process_half_conversations(
     corpus_root: Path,
     transcript_root: Path,
+    deposit_root: Path,
 ) -> list[dict]:
-    """Build metadata rows for CLARIN half_conversations sessions."""
+    """
+    Build deposit/half_conversations/ from CLARIN WAVs + v2 transcripts.
+    Returns metadata rows.
+    """
     clarin_pairs = find_clarin_wav_pairs(corpus_root, "half_conversations")
-    rows: list[dict] = []
+    metadata_rows: list[dict] = []
+
     for session_id in sorted(clarin_pairs):
+        session_dir = deposit_root / "half_conversations" / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        v2_stems = find_v2_stems(transcript_root, session_id)
+
+        # Copy CLARIN WAV renamed to v2 stem.
+        for spk, wav_path in sorted(clarin_pairs[session_id].items()):
+            stem = v2_stems.get(spk)
+            dst_name = f"{stem}.wav" if stem else wav_path.name
+            copy_file(wav_path, session_dir / dst_name)
+
+        # Copy v2 JSON transcripts.
+        v2_paths = find_v2_transcript_paths(transcript_root, session_id)
+        for jf in sorted(v2_paths.values()):
+            copy_file(jf, session_dir / jf.name)
+
         _append_metadata_rows(
-            rows, session_id, "half",
+            metadata_rows, session_id, "half",
             clarin_pairs[session_id], transcript_root,
             params=None, has_mixed=False, audio_excluded=False,
         )
-    return rows
+
+    print(f"Processed half_conversations/: {len(clarin_pairs)} sessions")
+    return metadata_rows
 
 
 # ---------------------------------------------------------------------------
@@ -319,13 +362,16 @@ def main():
             print(f"Error: {label} not found or not a directory: {p}", file=sys.stderr)
             sys.exit(1)
 
-    # 1. full_conversations
+    # 1. full_conversations (48 CLARIN sessions)
     print("Processing full_conversations...")
     fc_metadata, stats = process_full_conversations(
         corpus_root, transcript_root, output_root, deposit_root
     )
 
-    # 2. Passthrough directories from transcript_root
+    # 2. half_conversations (6 CLARIN sessions, built from WAVs + v2 transcripts)
+    half_metadata = process_half_conversations(corpus_root, transcript_root, deposit_root)
+
+    # 3. Passthrough directories from transcript_root
     for dirname in PASSTHROUGH_DIRS:
         src = transcript_root / dirname
         if src.exists():
@@ -335,7 +381,7 @@ def main():
         else:
             print(f"  (skipped {dirname}/: not found in transcript_root)")
 
-    # 3. Top-level files from transcript_root
+    # 4. Top-level files from transcript_root
     for fname in PASSTHROUGH_FILES:
         src = transcript_root / fname
         if src.exists():
@@ -344,14 +390,13 @@ def main():
         else:
             print(f"  (skipped {fname}: not found)")
 
-    # 4. Metadata TSV
-    half_metadata = half_conversations_metadata(corpus_root, transcript_root)
+    # 5. Metadata TSV
     all_metadata = fc_metadata + half_metadata
     metadata_path = deposit_root / "metadata.tsv"
     write_metadata_tsv(metadata_path, all_metadata)
     print(f"Written metadata.tsv ({len(all_metadata)} rows)")
 
-    # 5. docs/manual_transcripts.json (anonymised)
+    # 6. docs/manual_transcripts.json (anonymised)
     anon_src = next(corpus_root.rglob("manual_transcripts_anon.json"), None)
     if anon_src is not None:
         docs_dir = deposit_root / "docs"
@@ -365,19 +410,19 @@ def main():
             file=sys.stderr,
         )
 
-    # 6. code/README.txt
+    # 7. code/README.txt
     code_dir = deposit_root / "code"
     code_dir.mkdir(parents=True, exist_ok=True)
     (code_dir / "README.txt").write_text(CODE_README_TEXT, encoding="utf-8")
     print("Written code/README.txt")
 
-    # 7. Summary
+    # 8. Summary
     print()
     print(f"Summary:")
-    print(f"  Total full_conversations sessions: {stats['total']}")
-    print(f"  With mixed audio:                  {stats['with_mixed']}")
-    print(f"  Without mixed audio:               {stats['without_mixed']}")
-    print(f"  Excluded (no audio output):        {stats['excluded']}")
+    print(f"  full_conversations sessions: {stats['total']} (CLARIN)")
+    print(f"    With mixed audio:          {stats['with_mixed']}")
+    print(f"    Excluded (no output):      {stats['excluded']}")
+    print(f"  half_conversations sessions: {len(half_metadata)} (CLARIN)")
     if stats["warnings"]:
         print(f"  Warnings ({len(stats['warnings'])}):")
         for w in stats["warnings"]:
