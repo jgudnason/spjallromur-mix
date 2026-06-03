@@ -15,7 +15,8 @@ alignment outcome:
     <session_id>/      WAV (renamed to v2 stem) + v2 JSON transcript
 
 Top-level: README.md, LICENSE, evaluation_of_alignment.md, metadata.tsv,
-           docs/manual_transcripts.json (anonymised), code/README.txt.
+           annotations/manual_transcripts_20260326.json (anonymised),
+           code/README.txt.
 """
 
 import argparse
@@ -29,9 +30,9 @@ EXCLUDED_SESSIONS = {"198f2863"}
 # Directories under transcript_root copied to deposit unchanged.
 # half_conversations and unaligned are NOT passthrough — they are rebuilt from
 # CLARIN WAVs so the deposit structure mirrors the recording structure.
-# combined/, segmented/, results/, src/ are GitHub repo artefacts (code and
-# derived experimental data) and do not belong in the CLARIN corpus release.
-PASSTHROUGH_DIRS = ("splits",)
+# splits/, combined/, segmented/, results/, src/ are GitHub repo artefacts
+# and do not belong in the CLARIN corpus release.
+PASSTHROUGH_DIRS = ()
 
 # Top-level files copied from transcript_root.
 PASSTHROUGH_FILES = ("README.md", "LICENSE", "evaluation_of_alignment.md")
@@ -398,13 +399,16 @@ def main():
     write_metadata_tsv(metadata_path, all_metadata)
     print(f"Written metadata.tsv ({len(all_metadata)} rows)")
 
-    # 6. docs/manual_transcripts.json (anonymised)
+    # 6. annotations/manual_transcripts_20260326.json (anonymised)
+    # Date tag reflects when these transcriptions were completed and first
+    # released (Spjallrómur 26.03).  Future annotation batches get their own
+    # date-tagged file alongside this one.
     anon_src = next(corpus_root.rglob("manual_transcripts_anon.json"), None)
     if anon_src is not None:
-        docs_dir = deposit_root / "docs"
-        docs_dir.mkdir(parents=True, exist_ok=True)
-        copy_file(anon_src, docs_dir / "manual_transcripts.json")
-        print("Copied docs/manual_transcripts.json (anonymised)")
+        annotations_dir = deposit_root / "annotations"
+        annotations_dir.mkdir(parents=True, exist_ok=True)
+        copy_file(anon_src, annotations_dir / "manual_transcripts_20260326.json")
+        print("Copied annotations/manual_transcripts_20260326.json (anonymised)")
     else:
         print(
             "  WARNING: manual_transcripts_anon.json not found under corpus-root; "
