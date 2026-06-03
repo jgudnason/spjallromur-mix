@@ -35,7 +35,29 @@ EXCLUDED_SESSIONS = {"198f2863"}
 PASSTHROUGH_DIRS = ()
 
 # Top-level files copied from transcript_root.
-PASSTHROUGH_FILES = ("README.md", "LICENSE", "evaluation_of_alignment.md")
+# LICENSE is NOT copied from transcript_root (which carries GPL v3 from the
+# GitHub repo); the corpus deposit uses CC BY 4.0, written explicitly below.
+PASSTHROUGH_FILES = ("README.md", "evaluation_of_alignment.md")
+
+CC_BY_40_LICENSE = """\
+Spjallrómur Corpus
+
+Copyright (C) 2026 Language and Voice Lab, Reykjavík University
+
+This dataset is licensed under the Creative Commons Attribution 4.0
+International License (CC BY 4.0).
+
+You are free to:
+  Share — copy and redistribute the material in any medium or format
+  Adapt — remix, transform, and build upon the material for any purpose,
+          even commercially
+
+Under the following terms:
+  Attribution — You must give appropriate credit, provide a link to the
+                license, and indicate if changes were made.
+
+Full license text: https://creativecommons.org/licenses/by/4.0/legalcode
+"""
 
 CODE_README_TEXT = (
     "Mixing pipeline: https://github.com/jgudnason/spjallromur-mix\n\n"
@@ -392,6 +414,11 @@ def main():
             print(f"Copied {fname}")
         else:
             print(f"  (skipped {fname}: not found)")
+
+    # CC BY 4.0 license for the corpus deposit (transcript_root carries GPL v3
+    # from the GitHub repo, which is not appropriate for corpus data).
+    (deposit_root / "LICENSE").write_text(CC_BY_40_LICENSE, encoding="utf-8")
+    print("Written LICENSE (CC BY 4.0)")
 
     # 5. Metadata TSV
     all_metadata = fc_metadata + half_metadata
