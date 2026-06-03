@@ -29,7 +29,9 @@ EXCLUDED_SESSIONS = {"198f2863"}
 # Directories under transcript_root copied to deposit unchanged.
 # half_conversations and unaligned are NOT passthrough — they are rebuilt from
 # CLARIN WAVs so the deposit structure mirrors the recording structure.
-PASSTHROUGH_DIRS = ("splits", "combined", "segmented", "results", "src")
+# combined/, segmented/, results/, src/ are GitHub repo artefacts (code and
+# derived experimental data) and do not belong in the CLARIN corpus release.
+PASSTHROUGH_DIRS = ("splits",)
 
 # Top-level files copied from transcript_root.
 PASSTHROUGH_FILES = ("README.md", "LICENSE", "evaluation_of_alignment.md")
