@@ -17,7 +17,9 @@ and writes per-session parameter files and a corpus-level summary. No audio is p
 
 **Stage 2 — Synthesis (`synthesise.py`)**: reads the parameter files from Stage 1
 and produces, for each session, a mixed stereo WAV and corrected transcript files.
-One session (`198f2863`) is excluded due to bad audio quality.
+All 48 full conversations are processed; one session (`198f2863`) carries a
+`quality_warning` in its `session_params.json` due to a probable sample rate
+mismatch in the WAV header and the presence of multiple voices.
 
 **Stage 3 — Deposit (`prepare_deposit.py`)**: assembles the complete CLARIN v2
 deposit directory from the CLARIN source, the v2 transcript root, and the pipeline

@@ -103,6 +103,7 @@ inspect those sessions without any being silently dropped.
 ## Per-Session Parameter File (`session_params.json`)
 
 Written by Stage 1; updated by Stage 2 with `resample_ratio` and `transcript_source`.
+Sessions with known audio quality issues also receive a `quality_warning` field.
 
 ```json
 {
@@ -116,8 +117,6 @@ Written by Stage 1; updated by Stage 2 with `resample_ratio` and `transcript_sou
   "tier": "A",
   "resample_ratio": 1.00156138,
   "transcript_source": "v2",
-  "corrected_sample_rate": false,
-  "original_sample_rate": null,
   "pipeline_version": "1.0.0",
   "stage1_timestamp": "2026-05-13T00:00:00Z"
 }
@@ -125,8 +124,7 @@ Written by Stage 1; updated by Stage 2 with `resample_ratio` and `transcript_sou
 
 `reference_channel` is always the longer channel; the other is the target and is
 resampled. `above_1pct_threshold` is informational only — all sessions are processed
-regardless. `corrected_sample_rate` and `original_sample_rate` are set only for
-sessions with a known WAV header anomaly (see Known Session Anomalies below).
+regardless.
 
 ---
 
@@ -317,17 +315,18 @@ Original source WAV files and original transcript JSON files are not redistribut
 
 ## Known Session Anomalies
 
-### `198f2863` — excluded (bad audio quality)
+### `198f2863` — quality-flagged (probable sample rate mismatch)
 
-Session `198f2863` is excluded from pipeline output entirely. The recordings
-contain multiple voices, severe audio artefacts, and a probable sample rate
-mismatch (WAV header claims 16000 Hz; audio was likely recorded at 12000 Hz).
-The artefacts are too severe to produce a usable stereo mix.
+Session `198f2863` is processed by the full pipeline but carries a `quality_warning`
+in its `session_params.json`. The WAV header reports 16000 Hz but the audio was
+likely recorded at approximately 12000 Hz. The pipeline reads and mixes the audio
+at face value (no sample rate correction is applied), so the mixed output plays back
+approximately 33% too fast and high-pitched. The recording also contains multiple
+voices and audio artefacts.
 
-Stage 1 (`analyse.py`) still writes a `session_params.json` for this session, but
-with `"status": "excluded"` and an `"exclusion_reason"` field rather than the
-normal measurement fields. Stage 2 (`synthesise.py`) skips it with no audio or
-transcript output.
+No correction is applied deliberately: adding a resampling step would introduce
+further artefacts, and leaving the audio at its recorded rate gives downstream
+pipelines the raw signal to work with along with full documentation of the issue.
 
 ### `2a139f9b` — no v2 transcript
 
@@ -340,7 +339,6 @@ original, unverified CLARIN ones.
 
 ## Open Items
 
-- [ ] Confirm sample rate of all Spjallrómur sessions (assumed 16 kHz)
-- [ ] Validate Tier C on the worst-drift sessions before finalising anchor-point
-      estimation method
+- [ ] Confirm sample rate of all Spjallrómur sessions (assumed 16 kHz; session
+      `198f2863` is a known exception — see Known Session Anomalies)
 - [ ] Assign a version string and DOI for the pipeline release
