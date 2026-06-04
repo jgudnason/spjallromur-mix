@@ -8,17 +8,17 @@ import sys
 import soundfile as sf
 
 # Sessions where the WAV header reports an incorrect sample rate.
-# Key: session_id, Value: true recorded sample rate in Hz.
-SAMPLE_RATE_OVERRIDES = {
-    "198f2863": 12000,  # header says 16000 Hz; audio was recorded at 12000 Hz
-}
+# The pipeline does NOT correct for this — audio is read and mixed at face value.
+# The discrepancy is documented in the quality_warning field of session_params.json.
+SAMPLE_RATE_OVERRIDES: dict = {}
 
-# Sessions excluded from pipeline output due to bad audio quality.
-# analyse.py writes a session_params.json with status=excluded; synthesise.py skips them.
-EXCLUDED_SESSIONS = {
+# Sessions flagged for known audio quality issues.  Processing continues normally;
+# the warning is written into session_params.json for downstream pipelines.
+QUALITY_WARNINGS = {
     "198f2863": (
-        "audio recording quality too poor to mix — "
-        "multiple voices, severe audio artefacts, and probable sample rate mismatch"
+        "WAV header reports 16000 Hz but audio was likely recorded at ~12000 Hz. "
+        "The mixed audio will play back approximately 33% too fast and high-pitched. "
+        "Recording also contains multiple voices and audio artefacts."
     ),
 }
 
@@ -158,19 +158,6 @@ def main():
             print(f"Skipping session {session_id}: missing speaker_a or speaker_b WAV", file=sys.stderr)
             continue
 
-        if session_id in EXCLUDED_SESSIONS:
-            reason = EXCLUDED_SESSIONS[session_id]
-            print(f"[{session_id}] Excluded: {reason}")
-            output_dir = output_root / session_id
-            write_session_params(output_dir, session_id, {
-                "session_id": session_id,
-                "status": "excluded",
-                "exclusion_reason": reason,
-                "pipeline_version": "1.0.0",
-                "stage1_timestamp": timestamp,
-            })
-            continue
-
         path_a = wavs["a"]
         path_b = wavs["b"]
         duration_a = duration_seconds(path_a, session_id)
@@ -180,9 +167,6 @@ def main():
         reference_duration = max(duration_a, duration_b)
         drift_percent = (delta / reference_duration) * 100 if reference_duration > 0 else 0.0
         above_1pct = drift_percent > 1.0
-
-        corrected_sr = session_id in SAMPLE_RATE_OVERRIDES
-        original_sr = SAMPLE_RATE_OVERRIDES.get(session_id)
 
         params = {
             "session_id": session_id,
@@ -195,11 +179,11 @@ def main():
             "tier": "A",
             "resample_ratio": None,
             "transcript_source": None,
-            "corrected_sample_rate": corrected_sr,
-            "original_sample_rate": original_sr,
             "pipeline_version": "1.0.0",
             "stage1_timestamp": timestamp,
         }
+        if session_id in QUALITY_WARNINGS:
+            params["quality_warning"] = QUALITY_WARNINGS[session_id]
 
         output_dir = output_root / session_id
         write_session_params(output_dir, session_id, params)

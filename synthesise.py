@@ -10,16 +10,17 @@ import numpy as np
 import soundfile as sf
 
 # Sessions where the WAV header reports an incorrect sample rate.
-# Both channels are resampled from the true rate to 16000 Hz before drift correction.
-SAMPLE_RATE_OVERRIDES = {
-    "198f2863": 12000,  # header says 16000 Hz; audio was recorded at 12000 Hz
-}
+# The pipeline does NOT correct for this — audio is read and mixed at face value.
+# The discrepancy is documented in the quality_warning field of session_params.json.
+SAMPLE_RATE_OVERRIDES: dict = {}
 
-# Sessions skipped entirely — no audio or transcript output is produced.
-EXCLUDED_SESSIONS = {
+# Sessions flagged for known audio quality issues.  Processing continues normally;
+# the warning is written into session_params.json for downstream pipelines.
+QUALITY_WARNINGS = {
     "198f2863": (
-        "audio recording quality too poor to mix — "
-        "multiple voices, severe audio artefacts, and probable sample rate mismatch"
+        "WAV header reports 16000 Hz but audio was likely recorded at ~12000 Hz. "
+        "The mixed audio will play back approximately 33% too fast and high-pitched. "
+        "Recording also contains multiple voices and audio artefacts."
     ),
 }
 
@@ -176,18 +177,6 @@ def process_session(
     y_ref, sr_ref = librosa.load(str(wav_ref), sr=None, mono=True)
     y_tgt, sr_tgt = librosa.load(str(wav_tgt), sr=None, mono=True)
 
-    # Correct for sessions where the WAV header reports the wrong sample rate.
-    true_sr = SAMPLE_RATE_OVERRIDES.get(session_id)
-    if true_sr is not None:
-        target_sr_out = 16000
-        print(
-            f"  [{session_id}] Sample rate correction: {true_sr} Hz → {target_sr_out} Hz",
-            file=sys.stderr,
-        )
-        y_ref = librosa.resample(y_ref, orig_sr=true_sr, target_sr=target_sr_out, res_type=res_type)
-        y_tgt = librosa.resample(y_tgt, orig_sr=true_sr, target_sr=target_sr_out, res_type=res_type)
-        sr_ref = sr_tgt = target_sr_out
-
     if sr_ref != sr_tgt:
         print(
             f"  [{session_id}] WARNING: sample rate mismatch ({sr_ref} vs {sr_tgt})",
@@ -257,10 +246,13 @@ def process_session(
     print(f"  [{session_id}] Written: {merged_path.name}")
 
     # Update session_params.json with Stage 2 fields.
-    update_session_params(output_dir, {
+    updates = {
         "resample_ratio": round(resample_ratio, 8),
         "transcript_source": transcript_source,
-    })
+    }
+    if session_id in QUALITY_WARNINGS:
+        updates["quality_warning"] = QUALITY_WARNINGS[session_id]
+    update_session_params(output_dir, updates)
 
     return True
 
@@ -304,8 +296,8 @@ def main():
 
         session_id = params["session_id"]
 
-        if session_id in EXCLUDED_SESSIONS or params.get("status") == "excluded":
-            print(f"[{session_id}] Skipping (excluded: {EXCLUDED_SESSIONS.get(session_id, params.get('exclusion_reason', ''))})")
+        if params.get("status") == "excluded":
+            print(f"[{session_id}] Skipping (excluded: {params.get('exclusion_reason', '')})")
             skipped += 1
             continue
 

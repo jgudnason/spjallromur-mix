@@ -25,8 +25,6 @@ import shutil
 import sys
 from pathlib import Path
 
-EXCLUDED_SESSIONS = {"198f2863"}
-
 # Directories under transcript_root copied to deposit unchanged.
 # half_conversations and unaligned are NOT passthrough — they are rebuilt from
 # CLARIN WAVs so the deposit structure mirrors the recording structure.
@@ -202,10 +200,7 @@ def process_full_conversations(
         session_dir.mkdir(parents=True, exist_ok=True)
 
         params = read_session_params(output_root, session_id)
-        is_excluded = (
-            session_id in EXCLUDED_SESSIONS
-            or (params is not None and params.get("status") == "excluded")
-        )
+        is_excluded = (params is not None and params.get("status") == "excluded")
 
         # Always copy session_params.json if it exists.
         src_params = output_root / session_id / "session_params.json"
