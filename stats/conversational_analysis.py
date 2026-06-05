@@ -139,6 +139,19 @@ def analyse_session(session_id, merged):
     # slightly inflate this count.
     backchannel_count = sum(1 for d in durations if d < 1.0)
 
+    # Floor share: total speaking time per speaker as % of session duration.
+    # Does not sum to 100%: overlap intervals count for both speakers and
+    # silence intervals count for neither — this is correct and expected.
+    floor_pct_a = (
+        100.0 * sum(t["duration"] for t in a_turns) / recording_duration
+        if recording_duration > 0 else 0.0
+    )
+    floor_pct_b = (
+        100.0 * sum(t["duration"] for t in b_turns) / recording_duration
+        if recording_duration > 0 else 0.0
+    )
+    floor_balance = abs(floor_pct_a - floor_pct_b)
+
     return {
         "session_id": session_id,
         "recording_duration": recording_duration,
@@ -156,6 +169,9 @@ def analyse_session(session_id, merged):
         "backchannel_count": backchannel_count,
         "backchannel_pct": 100.0 * backchannel_count / n_turns if n_turns > 0 else 0.0,
         "longest_monologue_s": max(durations),
+        "floor_pct_a": floor_pct_a,
+        "floor_pct_b": floor_pct_b,
+        "floor_balance": floor_balance,
     }
 
 
@@ -182,7 +198,7 @@ def aggregate(all_stats):
 # Output: stdout summary
 # ---------------------------------------------------------------------------
 
-def print_summary(agg, n_sessions):
+def print_summary(agg, n_sessions, outlier_note=None):
     print(f"\nSpjallrómur Conversational Turn-Taking Analysis  ({n_sessions} sessions)\n")
     print(f"{'Statistic':<38} {'Mean ± Std':>22}  {'Min':>10}  {'Max':>10}")
     print("-" * 86)
@@ -203,6 +219,9 @@ def print_summary(agg, n_sessions):
         ("Backchannel proxy (count)",      "backchannel_count",         ".1f"),
         ("Backchannel proxy (%)",          "backchannel_pct",           ".1f"),
         ("Longest monologue (s)",          "longest_monologue_s",       ".1f"),
+        ("Floor share — Speaker A (%)",    "floor_pct_a",               ".1f"),
+        ("Floor share — Speaker B (%)",    "floor_pct_b",               ".1f"),
+        ("Floor balance |A−B| (%)",        "floor_balance",             ".1f"),
     ]
 
     for label, key, fmt in rows:
@@ -213,6 +232,16 @@ def print_summary(agg, n_sessions):
         print(f"{label:<38} {mean_std:>22}  {lo:>10}  {hi:>10}")
 
     print()
+
+    if outlier_note:
+        sid, dur_s, excl_mean, excl_std = outlier_note
+        dur_min = dur_s / 60
+        print(
+            f"NOTE: session {sid} contains a {dur_s:.1f} s ({dur_min:.1f} min) turn —\n"
+            f"      the longest in the corpus. This outlier inflates the Longest turn\n"
+            f"      mean and std. Excluding it: mean={excl_mean:.1f} s, std={excl_std:.1f} s."
+        )
+        print()
 
 
 # ---------------------------------------------------------------------------
@@ -236,43 +265,53 @@ def write_csv(all_stats, out_path):
 # Output: LaTeX table
 # ---------------------------------------------------------------------------
 
+def _latex_row(label, a, unit=""):
+    """Format one data row: label & mean ± std unit & min–max unit."""
+    def fmt(v):
+        return f"{v:.1f}"
+    mean_std = f"${fmt(a['mean'])} \\pm {fmt(a['std'])}${unit}"
+    rng = f"${fmt(a['min'])}$--${fmt(a['max'])}${unit}"
+    return f"    {label} & {mean_std} & {rng} \\\\"
+
+
 def write_latex(agg, n_sessions, out_path):
-    rows = [
-        ("Turns per session",            "n_turns",                   "0"),
-        ("\\quad Speaker A",             "n_turns_a",                 "0"),
-        ("\\quad Speaker B",             "n_turns_b",                 "0"),
-        ("Mean turn duration (s)",       "mean_turn_duration_s",      "2"),
-        ("Median turn duration (s)",     "median_turn_duration_s",    "2"),
-        ("Speaker overlap (s)",          "overlap_sec",               "1"),
-        ("Speaker overlap (\\%)",        "overlap_pct",               "1"),
-        ("Mean inter-turn gap (s)",      "mean_inter_turn_gap_s",     "2"),
-        ("Median inter-turn gap (s)",    "median_inter_turn_gap_s",   "2"),
-        ("Backchannel proxy (\\%)",      "backchannel_pct",           "1"),
-        ("Longest monologue (s)",        "longest_monologue_s",       "1"),
+    s = "~s"
+    pct = r"~\%"
+
+    data_rows = [
+        _latex_row("Turns per session",                    agg["n_turns"]),
+        _latex_row("Mean turn duration",                   agg["mean_turn_duration_s"],   s),
+        _latex_row("Median turn duration",                 agg["median_turn_duration_s"], s),
+        _latex_row("Speaker overlap",                      agg["overlap_pct"],            pct),
+        _latex_row("Mean inter-turn gap",                  agg["mean_inter_turn_gap_s"],  s),
+        _latex_row("Backchannel-length turns (\\% of all turns)", agg["backchannel_pct"], pct),
+        _latex_row("Longest turn",                         agg["longest_monologue_s"],    s),
+        _latex_row("Floor share speaker~A",                agg["floor_pct_a"],            pct),
+        _latex_row("Floor share speaker~B",                agg["floor_pct_b"],            pct),
+        _latex_row("Floor balance $|A - B|$",              agg["floor_balance"],          pct),
     ]
 
     lines = [
         "% Spjallrómur conversational turn-taking statistics",
         f"% {n_sessions} sessions (198f2863 excluded: quality_warning flag)",
         "% Generated by stats/conversational_analysis.py",
-        r"\begin{tabular}{lcc}",
-        r"\hline",
-        r"Statistic & Mean $\pm$ Std & Range \\",
-        r"\hline",
+        r"\begin{table}[t]",
+        r"  \caption{Conversational dynamics of Spjallr\'{o}mur (" + str(n_sessions) + r" sessions).",
+        r"           Statistics computed from forced-alignment transcripts",
+        r"           (94.6\% segment-level accuracy). Backchannel-length turns",
+        r"           are defined as turns under 1.0~s duration.}",
+        r"  \label{tab:conv-stats}",
+        r"  \centering",
+        r"  \begin{tabular}{lcc}",
+        r"    \toprule",
+        r"    Statistic & Mean $\pm$ Std & Range \\",
+        r"    \midrule",
+    ] + data_rows + [
+        r"    \bottomrule",
+        r"  \end{tabular}",
+        r"\end{table}",
+        "",
     ]
-
-    for label, key, fmt in rows:
-        a = agg[key]
-        if fmt == "0":
-            mean_std = f"${a['mean']:.0f} \\pm {a['std']:.0f}$"
-            rng = f"${a['min']:.0f}$--${a['max']:.0f}$"
-        else:
-            p = int(fmt)
-            mean_std = f"${a['mean']:.{p}f} \\pm {a['std']:.{p}f}$"
-            rng = f"${a['min']:.{p}f}$--${a['max']:.{p}f}$"
-        lines.append(f"{label} & {mean_std} & {rng} \\\\")
-
-    lines += [r"\hline", r"\end{tabular}", ""]
 
     out_path.write_text("\n".join(lines), encoding="utf-8")
     print(f"LaTeX table written:     {out_path}")
@@ -339,7 +378,20 @@ def main():
 
     agg = aggregate(all_stats)
 
-    print_summary(agg, len(all_stats))
+    # Outlier note for deb42548 (longest monologue in corpus)
+    OUTLIER_SESSION = "deb42548"
+    outlier_stats = next((s for s in all_stats if s["session_id"] == OUTLIER_SESSION), None)
+    outlier_note = None
+    if outlier_stats is not None:
+        excl_vals = [s["longest_monologue_s"] for s in all_stats if s["session_id"] != OUTLIER_SESSION]
+        outlier_note = (
+            OUTLIER_SESSION,
+            outlier_stats["longest_monologue_s"],
+            _mean(excl_vals),
+            _std(excl_vals),
+        )
+
+    print_summary(agg, len(all_stats), outlier_note=outlier_note)
     write_csv(all_stats, stats_dir / "conversational_stats.csv")
     write_latex(agg, len(all_stats), stats_dir / "conversational_stats_table.tex")
 
