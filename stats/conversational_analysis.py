@@ -152,12 +152,15 @@ def analyse_session(session_id, merged):
     )
     floor_balance = abs(floor_pct_a - floor_pct_b)
 
+    turns_per_min = n_turns / (recording_duration / 60.0) if recording_duration > 0 else 0.0
+
     return {
         "session_id": session_id,
         "recording_duration": recording_duration,
         "n_turns": n_turns,
         "n_turns_a": len(a_turns),
         "n_turns_b": len(b_turns),
+        "turns_per_min": turns_per_min,
         "mean_turn_duration_s": _mean(durations),
         "median_turn_duration_s": _median(durations),
         "max_turn_duration_s": max(durations),
@@ -208,6 +211,7 @@ def print_summary(agg, n_sessions, outlier_note=None):
         ("Turns per session",              "n_turns",                   ".1f"),
         ("  Speaker A",                    "n_turns_a",                 ".1f"),
         ("  Speaker B",                    "n_turns_b",                 ".1f"),
+        ("Turns per minute",               "turns_per_min",             ".1f"),
         ("Mean turn duration (s)",         "mean_turn_duration_s",      ".2f"),
         ("Median turn duration (s)",       "median_turn_duration_s",    ".2f"),
         ("Max turn duration (s)",          "max_turn_duration_s",       ".1f"),
@@ -234,12 +238,15 @@ def print_summary(agg, n_sessions, outlier_note=None):
     print()
 
     if outlier_note:
-        sid, dur_s, excl_mean, excl_std = outlier_note
-        dur_min = dur_s / 60
+        n = outlier_note
+        dur_min = n["dur_s"] / 60
         print(
-            f"NOTE: session {sid} contains a {dur_s:.1f} s ({dur_min:.1f} min) turn —\n"
-            f"      the longest in the corpus. This outlier inflates the Longest turn\n"
-            f"      mean and std. Excluding it: mean={excl_mean:.1f} s, std={excl_std:.1f} s."
+            f"NOTE: session {n['session_id']} contains a {n['dur_s']:.1f} s ({dur_min:.1f} min) turn —\n"
+            f"      the longest in the corpus in absolute terms, but {n['dur_pct']:.1f}% of session\n"
+            f"      duration. turns_per_min for this session: {n['turns_per_min']:.1f}"
+            f" (corpus mean: {n['corpus_mean_tpm']:.1f}).\n"
+            f"      Excluding {n['session_id']}: longest_turn mean={n['excl_mean']:.1f} s,"
+            f" std={n['excl_std']:.1f} s."
         )
         print()
 
@@ -279,7 +286,7 @@ def write_latex(agg, n_sessions, out_path):
     pct = r"~\%"
 
     data_rows = [
-        _latex_row("Turns per session",                    agg["n_turns"]),
+        _latex_row("Turns per minute",                     agg["turns_per_min"]),
         _latex_row("Mean turn duration",                   agg["mean_turn_duration_s"],   s),
         _latex_row("Median turn duration",                 agg["median_turn_duration_s"], s),
         _latex_row("Speaker overlap",                      agg["overlap_pct"],            pct),
@@ -378,18 +385,22 @@ def main():
 
     agg = aggregate(all_stats)
 
-    # Outlier note for deb42548 (longest monologue in corpus)
+    # Outlier note for deb42548 (longest turn in corpus)
     OUTLIER_SESSION = "deb42548"
     outlier_stats = next((s for s in all_stats if s["session_id"] == OUTLIER_SESSION), None)
     outlier_note = None
     if outlier_stats is not None:
         excl_vals = [s["longest_monologue_s"] for s in all_stats if s["session_id"] != OUTLIER_SESSION]
-        outlier_note = (
-            OUTLIER_SESSION,
-            outlier_stats["longest_monologue_s"],
-            _mean(excl_vals),
-            _std(excl_vals),
-        )
+        outlier_note = {
+            "session_id": OUTLIER_SESSION,
+            "dur_s": outlier_stats["longest_monologue_s"],
+            "dur_pct": (outlier_stats["longest_monologue_s"] / outlier_stats["recording_duration"] * 100
+                        if outlier_stats["recording_duration"] > 0 else 0.0),
+            "turns_per_min": outlier_stats["turns_per_min"],
+            "corpus_mean_tpm": agg["turns_per_min"]["mean"],
+            "excl_mean": _mean(excl_vals),
+            "excl_std": _std(excl_vals),
+        }
 
     print_summary(agg, len(all_stats), outlier_note=outlier_note)
     write_csv(all_stats, stats_dir / "conversational_stats.csv")
