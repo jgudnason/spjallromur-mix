@@ -5,7 +5,9 @@ venv/
 *.wav
 *.json
 !DESIGN.md
+!.claude/settings.example.json
 .claude/settings.json
+.claude/settings.local.json
 output*/
 .DS_Store
 *.png

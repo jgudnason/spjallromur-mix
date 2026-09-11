@@ -92,6 +92,22 @@ python stats/corpus_stats_table.py \
 
 Prints computed statistics and emits a LaTeX table for the resource paper.
 
+## Conversational analysis
+
+```bash
+python stats/conversational_analysis.py --output-root /path/to/output
+```
+
+Turn-taking analysis over the merged transcripts produced by Stage 2: turn
+durations, speaking time, overlaps, gaps and turn-taking rates, reported both
+corpus-wide and separately for Speaker A and Speaker B. Sessions carrying a
+`quality_warning` are excluded. Writes `stats/conversational_stats.csv` (per
+session) and `stats/conversational_stats_table.tex` (summary table for the
+resource paper).
+
+Statistics are derived from forced-alignment timestamps, so small alignment
+errors propagate into the overlap and gap estimates.
+
 ## Licence
 
 The pipeline code in this repository is licensed under the

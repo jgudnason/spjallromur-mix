@@ -15,7 +15,7 @@ alignment outcome:
     <session_id>/      WAV (renamed to v2 stem) + v2 JSON transcript
 
 Top-level: README.md, LICENSE, evaluation_of_alignment.md, metadata.tsv,
-           annotations/manual_transcripts_20260326.json (anonymised),
+           annotations/manual_transcripts_20260326.json,
            code/README.txt.
 """
 
@@ -31,6 +31,15 @@ from pathlib import Path
 # splits/, combined/, segmented/, results/, src/ are GitHub repo artefacts
 # and do not belong in the CLARIN corpus release.
 PASSTHROUGH_DIRS = ()
+
+# Filenames that must never reach the deposit, matched on the SOURCE filename at
+# the single copy choke point below.  The corpus docs/ directory is not copied to
+# the deposit today (PASSTHROUGH_DIRS is empty), but adding "docs" to it would
+# otherwise ship the pre-anonymisation annotation file.  Anything listed here is
+# skipped and reported, never silently dropped.
+EXCLUDED_FILENAMES = frozenset({
+    "manual_transcripts_original.json",  # pre-anonymisation originals; retained in the corpus, never deposited
+})
 
 # Top-level files copied from transcript_root.
 # LICENSE is NOT copied from transcript_root (which carries GPL v3 from the
@@ -147,20 +156,22 @@ def read_session_params(output_root: Path, session_id: str) -> dict | None:
     return None
 
 
-def copy_file(src: Path, dst: Path) -> None:
+def copy_file(src: Path, dst: Path) -> bool:
+    """Copy src to dst unless src is on the exclusion list.  Returns True if copied."""
+    if src.name in EXCLUDED_FILENAMES:
+        print(f"  EXCLUDED from deposit: {src.name}", file=sys.stderr)
+        return False
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(str(src), str(dst))
+    return True
 
 
 def copy_dir_unchanged(src: Path, dst: Path) -> int:
     count = 0
     for f in src.rglob("*"):
         if f.is_file():
-            rel = f.relative_to(src)
-            target = dst / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(f), str(target))
-            count += 1
+            if copy_file(f, dst / f.relative_to(src)):
+                count += 1
     return count
 
 
@@ -421,20 +432,22 @@ def main():
     write_metadata_tsv(metadata_path, all_metadata)
     print(f"Written metadata.tsv ({len(all_metadata)} rows)")
 
-    # 6. annotations/manual_transcripts_20260326.json (anonymised)
+    # 6. annotations/manual_transcripts_20260326.json
     # Date tag reflects when these transcriptions were completed and first
     # released (Spjallrómur 26.03).  Future annotation batches get their own
     # date-tagged file alongside this one.
-    anon_src = next(corpus_root.rglob("manual_transcripts_anon.json"), None)
-    if anon_src is not None:
+    # The corpus is expected to supply manual_transcripts.json already
+    # anonymised; the pipeline does no anonymisation of its own.
+    manual_src = next(corpus_root.rglob("manual_transcripts.json"), None)
+    if manual_src is not None:
         annotations_dir = deposit_root / "annotations"
         annotations_dir.mkdir(parents=True, exist_ok=True)
-        copy_file(anon_src, annotations_dir / "manual_transcripts_20260326.json")
-        print("Copied annotations/manual_transcripts_20260326.json (anonymised)")
+        copy_file(manual_src, annotations_dir / "manual_transcripts_20260326.json")
+        print("Copied annotations/manual_transcripts_20260326.json")
     else:
         print(
-            "  WARNING: manual_transcripts_anon.json not found under corpus-root; "
-            "run anonymise_manual_transcripts.py first",
+            "  WARNING: manual_transcripts.json not found under corpus-root; "
+            "annotations/ will be missing from the deposit",
             file=sys.stderr,
         )
 

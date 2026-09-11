@@ -22,14 +22,13 @@ per-session parameter files — are released alongside the code.
 
 ## Architecture
 
-The pipeline is divided into two independent stages.
+The pipeline is divided into three independent stages.
 
 ### Stage 1 — Analysis (`analyse.py`)
 
 Iterates over all sessions in the source corpus. For each session, it measures the
-lengths of both channels, characterises the drift, classifies the session into one
-of three tiers, and writes a per-session parameter file. It also writes a corpus-
-level summary.
+lengths of both channels, characterises the drift, and writes a per-session
+parameter file. It also writes a corpus-level summary.
 
 **No audio output is produced in Stage 1.**
 
@@ -39,6 +38,22 @@ Reads per-session parameter files produced by Stage 1. For each session, it appl
 the correction specified in the parameter file to align the two channels, writes the
 mixed stereo WAV, and writes corrected transcript JSON files. Stage 2 can be run
 blindly on any session for which a valid parameter file exists.
+
+### Stage 3 — Deposit (`prepare_deposit.py`)
+
+Assembles the CLARIN v2 deposit directory from three read-only inputs: the CLARIN
+corpus (`--corpus-root`), the v2 transcript release (`--transcript-root`), and the
+Stage 1/2 pipeline outputs (`--output-root`). It mirrors the CLARIN recording
+structure — `full_conversations/` (48 sessions) and `half_conversations/`
+(6 sessions) — renames the CLARIN WAVs to the v2 stem convention, copies the v2
+transcripts and pipeline outputs alongside them, and writes `metadata.tsv`, a
+CC BY 4.0 `LICENSE`, `annotations/`, and `code/README.txt`.
+
+The manual transcript annotations are copied from the corpus as-is. The corpus is
+expected to supply `manual_transcripts.json` already anonymised; the pipeline does
+no anonymisation of its own. `EXCLUDED_FILENAMES` names files that must never be
+deposited, enforced at the single copy choke point and reported when they are
+skipped.
 
 ---
 
@@ -86,17 +101,18 @@ within each session folder.
 
 ## Drift Model
 
-All sessions are processed using a single linear resample (Tier A), regardless of
-drift magnitude. The shorter channel is resampled to match the length of the longer
+All sessions are processed using a single linear resample, regardless of drift
+magnitude. The shorter channel is resampled to match the length of the longer
 channel using a single linear stretch factor:
 
 **Correction parameter:** `resample_ratio = len_longer_samples / len_shorter_samples`
 
 Stage 1 computes natural gap thresholds in the drift distribution and records them
 in `corpus_summary.json` as `proposed_thresholds`. These are **informational only**
-and do not gate processing. The `above_1pct_threshold` flag in each
-`session_params.json` marks sessions where drift exceeds 1% so that reviewers can
-inspect those sessions without any being silently dropped.
+and do not gate processing; no session is treated differently on their basis.
+The `above_1pct_threshold` flag in each `session_params.json` marks sessions where
+drift exceeds 1% so that reviewers can inspect those sessions without any being
+silently dropped.
 
 ---
 
@@ -124,7 +140,8 @@ Sessions with known audio quality issues also receive a `quality_warning` field.
 
 `reference_channel` is always the longer channel; the other is the target and is
 resampled. `above_1pct_threshold` is informational only — all sessions are processed
-regardless.
+regardless. `tier` is always `"A"`; the field is retained for schema compatibility
+with earlier releases and carries no behavioural meaning.
 
 ---
 
@@ -144,7 +161,7 @@ Both corrected transcripts share the same absolute timeline as the mixed stereo 
 For each session, Stage 2 executes the following steps in order:
 
 1. **Determine alignment function** — read `session_params.json` to obtain the
-   correction parameters for this session's tier.
+   correction parameters for this session.
 
 2. **Apply alignment function to the target signal** — warp the shorter channel's
    audio to match the reference channel's duration, producing an aligned signal.
@@ -210,17 +227,10 @@ metadata fields: `audio_file` (pointing to the mixed WAV) and `audio_duration`
 (updated to the reference channel duration). A `"speaker"` field (`"a"` or `"b"`)
 is added to every word in both transcripts.
 
-For **Tier A**, remapping is a scalar multiplication:
+Remapping is a scalar multiplication:
 ```
 t_new = t_old * resample_ratio
 ```
-
-For **Tier B**, remapping applies the offset first, then the ratio:
-```
-t_new = (t_old + offset_sec) * resample_ratio
-```
-
-For **Tier C**, remapping uses linear interpolation through the anchor points.
 
 Original transcript files are never modified.
 
@@ -248,11 +258,11 @@ by `start` time. Each word retains its `"speaker"` field. The top-level structur
 
 Written by Stage 1 after processing all sessions. Contains:
 
-- Per-session: `session_id`, `duration_a`, `duration_b`, `delta_sec`,
-  `drift_percent`, `tier`
-- Aggregate statistics: mean/std/max drift across all sessions
-- Proposed tier thresholds with rationale
-- Count of sessions per tier
+- Per-session: `session_id`, `duration_a_sec`, `duration_b_sec`, `delta_sec`,
+  `drift_percent`, `above_1pct_threshold`, `tier`
+- Aggregate statistics: count, mean/std/max drift, and the number of sessions
+  above the 1% drift threshold
+- Proposed thresholds with rationale (informational only)
 
 ---
 
@@ -284,28 +294,36 @@ No other dependencies. Python 3.10+.
 
 ## Configurables (command-line arguments)
 
-Both scripts accept:
+All three stages accept:
 
-| Argument | Default | Description |
-|---|---|---|
-| `--corpus-root` | (required) | Path to CLARIN corpus root (WAV files) |
-| `--transcript-root` | (required\*) | Path to v2 transcript root; CLARIN used as fallback |
-| `--output-root` | (required) | Path to output directory |
-| `--sessions` | all | Comma-separated list of session IDs to process |
-| `--res-type` | `kaiser_best` | librosa resampling quality |
+| Argument | Default | Description | Used by |
+|---|---|---|---|
+| `--corpus-root` | (required) | Path to CLARIN corpus root (WAV files) | all |
+| `--transcript-root` | (required\*) | Path to v2 transcript root; CLARIN used as fallback | all |
+| `--output-root` | (required) | Path to output directory | all |
+| `--deposit-root` | (required) | Path to the deposit directory to assemble | Stage 3 |
+| `--sessions` | all | Comma-separated list of session IDs to process | Stage 2 |
+| `--res-type` | `kaiser_best` | librosa resampling quality | Stage 2 |
 
-\* Optional in `analyse.py` (not used for filtering); required in `synthesise.py`.
+\* Optional in `analyse.py` (not used for filtering); required in `synthesise.py`
+and `prepare_deposit.py`.
+
+`--corpus-root` and `--transcript-root` should both point at the release roots, not
+at a `full_conversations/` subdirectory: Stage 2 resolves v2 transcripts relative to
+`<transcript_root>/full_conversations/`, and Stage 3 needs `half_conversations/`
+to be reachable under `<corpus_root>`.
 
 ---
 
 ## What Is Released
 
-- `analyse.py` and `synthesise.py`
+- `analyse.py`, `synthesise.py` and `prepare_deposit.py`
 - `corpus_summary.json`
 - Per-session `session_params.json` files
 - Mixed stereo WAV files (`*_mixed.wav`)
 - Per-speaker aligned transcript JSON files (`*_aligned.json`)
 - Merged transcript JSON files (`*_transcript_merged.json`)
+- The assembled CLARIN deposit directory (Stage 3 output)
 - This `DESIGN.md`
 
 Original source WAV files and original transcript JSON files are not redistributed
