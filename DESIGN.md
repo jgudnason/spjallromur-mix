@@ -286,9 +286,13 @@ librosa
 soundfile
 numpy
 scipy
+resampy
 ```
 
-No other dependencies. Python 3.10+.
+No other dependencies. Python 3.11 - 3.12.
+
+`resampy` is required by the default `--res-type kaiser_best`; librosa treats it as
+an optional extra, so it is pinned explicitly here.
 
 ---
 

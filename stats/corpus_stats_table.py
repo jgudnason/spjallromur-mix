@@ -19,10 +19,10 @@ import json
 from pathlib import Path
 from collections import Counter, defaultdict
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def clarin_session_dirs(corpus_root: Path, conv_type: str) -> list[Path]:
     """Return sorted list of session directories for a CLARIN conversation type."""
@@ -37,7 +37,8 @@ def clarin_session_dirs(corpus_root: Path, conv_type: str) -> list[Path]:
 
 def clarin_speaker_count(corpus_root: Path, conv_type: str) -> int:
     return sum(
-        1 for _ in corpus_root.rglob("speaker_*_convo_*_demographics.json")
+        1
+        for _ in corpus_root.rglob("speaker_*_convo_*_demographics.json")
         if conv_type in _.parts
     )
 
@@ -59,7 +60,7 @@ def find_v2_stem(transcript_root: Path, session_id: str, speaker: str) -> str | 
 
 def age_gender_from_stem(stem: str) -> tuple[str, str]:
     parts = stem.split("_")
-    age    = parts[2] if len(parts) >= 3 else ""
+    age = parts[2] if len(parts) >= 3 else ""
     gender = parts[3] if len(parts) >= 4 else ""
     return age, gender
 
@@ -78,6 +79,7 @@ def pct(n: int, total: int) -> str:
 # ---------------------------------------------------------------------------
 # Manual transcript coverage
 # ---------------------------------------------------------------------------
+
 
 def find_manual_transcripts_file(corpus_root: Path) -> Path | None:
     """Locate the manual transcript annotations in the corpus.
@@ -101,10 +103,10 @@ def compute_manual_transcript_stats(corpus_root: Path) -> dict:
     if path is None:
         return {
             "manually_transcribed_sessions": None,
-            "triple_annotator_sessions":     None,
-            "dual_annotator_sessions":       None,
-            "total_manual_h":                None,
-            "manual_transcripts_found":      False,
+            "triple_annotator_sessions": None,
+            "dual_annotator_sessions": None,
+            "total_manual_h": None,
+            "manual_transcripts_found": False,
         }
 
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -122,17 +124,17 @@ def compute_manual_transcript_stats(corpus_root: Path) -> dict:
         )
         session_duration[sid] = dur  # same for all entries of the same session
 
-    unique_sessions    = len(session_transcribers)
-    triple_sessions    = sum(1 for ts in session_transcribers.values() if len(ts) == 2)
-    dual_sessions      = sum(1 for ts in session_transcribers.values() if len(ts) == 1)
-    total_manual_h     = sum(session_duration.values()) / 3600
+    unique_sessions = len(session_transcribers)
+    triple_sessions = sum(1 for ts in session_transcribers.values() if len(ts) == 2)
+    dual_sessions = sum(1 for ts in session_transcribers.values() if len(ts) == 1)
+    total_manual_h = sum(session_duration.values()) / 3600
 
     return {
         "manually_transcribed_sessions": unique_sessions,
-        "triple_annotator_sessions":     triple_sessions,
-        "dual_annotator_sessions":       dual_sessions,
-        "total_manual_h":                total_manual_h,
-        "manual_transcripts_found":      True,
+        "triple_annotator_sessions": triple_sessions,
+        "dual_annotator_sessions": dual_sessions,
+        "total_manual_h": total_manual_h,
+        "manual_transcripts_found": True,
     }
 
 
@@ -140,19 +142,19 @@ def compute_manual_transcript_stats(corpus_root: Path) -> dict:
 # Main computation
 # ---------------------------------------------------------------------------
 
+
 def compute_stats(corpus_root: Path, transcript_root: Path, output_root: Path) -> dict:
     stats = {}
 
     # --- Full corpus (CLARIN) ---
     clarin_full_dirs = clarin_session_dirs(corpus_root, "full_conversations")
     clarin_half_dirs = clarin_session_dirs(corpus_root, "half_conversations")
-    stats["clarin_full_sessions"]  = len(clarin_full_dirs)
-    stats["clarin_half_sessions"]  = len(clarin_half_dirs)
+    stats["clarin_full_sessions"] = len(clarin_full_dirs)
+    stats["clarin_half_sessions"] = len(clarin_half_dirs)
     stats["clarin_total_sessions"] = len(clarin_full_dirs) + len(clarin_half_dirs)
-    stats["clarin_total_spk"]      = (
-        clarin_speaker_count(corpus_root, "full_conversations")
-        + clarin_speaker_count(corpus_root, "half_conversations")
-    )
+    stats["clarin_total_spk"] = clarin_speaker_count(
+        corpus_root, "full_conversations"
+    ) + clarin_speaker_count(corpus_root, "half_conversations")
 
     # Excluded sessions
     excluded_ids = set()
@@ -171,20 +173,24 @@ def compute_stats(corpus_root: Path, transcript_root: Path, output_root: Path) -
 
     stats["processed_sessions"] = len(processed_sessions)
 
-    durations = [max(p["duration_a_sec"], p["duration_b_sec"]) for p in processed_sessions]
-    stats["total_duration_h"]  = sum(durations) / 3600
-    stats["mean_duration_min"] = (sum(durations) / len(durations)) / 60 if durations else 0
-    stats["min_duration_min"]  = min(durations) / 60 if durations else 0
-    stats["max_duration_min"]  = max(durations) / 60 if durations else 0
+    durations = [
+        max(p["duration_a_sec"], p["duration_b_sec"]) for p in processed_sessions
+    ]
+    stats["total_duration_h"] = sum(durations) / 3600
+    stats["mean_duration_min"] = (
+        (sum(durations) / len(durations)) / 60 if durations else 0
+    )
+    stats["min_duration_min"] = min(durations) / 60 if durations else 0
+    stats["max_duration_min"] = max(durations) / 60 if durations else 0
 
     # --- Speaker demographics ---
-    age_counter    = Counter()
+    age_counter = Counter()
     gender_counter = Counter()
-    missing_stems  = []
-    total_spk      = 0
+    missing_stems = []
+    total_spk = 0
 
     clarin_full_ids = {d.name for d in clarin_full_dirs}
-    processed_ids   = {p["session_id"] for p in processed_sessions}
+    processed_ids = {p["session_id"] for p in processed_sessions}
 
     for session_id in sorted(processed_ids & clarin_full_ids):
         for spk in ("a", "b"):
@@ -192,23 +198,31 @@ def compute_stats(corpus_root: Path, transcript_root: Path, output_root: Path) -
             stem = find_v2_stem(transcript_root, session_id, spk)
             if stem:
                 age, gender = age_gender_from_stem(stem)
-                age_counter[age]       += 1
+                age_counter[age] += 1
                 gender_counter[gender] += 1
             else:
                 missing_stems.append(f"{session_id}/{spk}")
 
     stats["total_spk_processed"] = total_spk
-    stats["missing_stems"]       = missing_stems
-    stats["gender"]              = dict(gender_counter)
-    stats["age"]                 = dict(age_counter)
+    stats["missing_stems"] = missing_stems
+    stats["gender"] = dict(gender_counter)
+    stats["age"] = dict(age_counter)
 
     def age_lower(age_str: str) -> int:
         return int(age_str.split("-")[0].rstrip("+"))
 
-    stats["age_18_29"]  = sum(n for a, n in age_counter.items() if a and age_lower(a) < 30)
-    stats["age_30_39"]  = sum(n for a, n in age_counter.items() if a and 30 <= age_lower(a) <= 39)
-    stats["age_40_49"]  = sum(n for a, n in age_counter.items() if a and 40 <= age_lower(a) <= 49)
-    stats["age_50plus"] = sum(n for a, n in age_counter.items() if a and age_lower(a) >= 50)
+    stats["age_18_29"] = sum(
+        n for a, n in age_counter.items() if a and age_lower(a) < 30
+    )
+    stats["age_30_39"] = sum(
+        n for a, n in age_counter.items() if a and 30 <= age_lower(a) <= 39
+    )
+    stats["age_40_49"] = sum(
+        n for a, n in age_counter.items() if a and 40 <= age_lower(a) <= 49
+    )
+    stats["age_50plus"] = sum(
+        n for a, n in age_counter.items() if a and age_lower(a) >= 50
+    )
 
     # --- Manual transcription coverage ---
     stats.update(compute_manual_transcript_stats(corpus_root))
@@ -219,6 +233,7 @@ def compute_stats(corpus_root: Path, transcript_root: Path, output_root: Path) -
 # ---------------------------------------------------------------------------
 # LaTeX table generation
 # ---------------------------------------------------------------------------
+
 
 def generate_table(s: dict) -> str:
     n_spk = s["total_spk_processed"]
@@ -232,17 +247,17 @@ def generate_table(s: dict) -> str:
     n_40 = s["age_40_49"]
     n_50 = s["age_50plus"]
 
-    total_h   = fmt_num(s["total_duration_h"],  precision=1, unit=" h")
-    mean_min  = fmt_num(s["mean_duration_min"],  precision=1, unit=" min")
+    total_h = fmt_num(s["total_duration_h"], precision=1, unit=" h")
+    mean_min = fmt_num(s["mean_duration_min"], precision=1, unit=" min")
     range_min = (
         f"{fmt_num(s['min_duration_min'], precision=1)}"
         f"--{fmt_num(s['max_duration_min'], precision=1)} min"
     )
 
-    mt_sess  = fmt_num(s["manually_transcribed_sessions"], precision=0)
-    triple   = fmt_num(s["triple_annotator_sessions"],     precision=0)
-    dual     = fmt_num(s["dual_annotator_sessions"],       precision=0)
-    mt_hours = fmt_num(s["total_manual_h"],                precision=1, unit=" h")
+    mt_sess = fmt_num(s["manually_transcribed_sessions"], precision=0)
+    triple = fmt_num(s["triple_annotator_sessions"], precision=0)
+    dual = fmt_num(s["dual_annotator_sessions"], precision=0)
+    mt_hours = fmt_num(s["total_manual_h"], precision=1, unit=" h")
 
     lines = [
         r"\begin{table}[t]",
@@ -291,16 +306,19 @@ def generate_table(s: dict) -> str:
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Generate LaTeX corpus statistics table.")
-    parser.add_argument("--corpus-root",     required=True, help="CLARIN corpus root.")
+    parser = argparse.ArgumentParser(
+        description="Generate LaTeX corpus statistics table."
+    )
+    parser.add_argument("--corpus-root", required=True, help="CLARIN corpus root.")
     parser.add_argument("--transcript-root", required=True, help="v2 transcript root.")
-    parser.add_argument("--output-root",     required=True, help="Pipeline output root.")
+    parser.add_argument("--output-root", required=True, help="Pipeline output root.")
     args = parser.parse_args()
 
-    corpus_root     = Path(args.corpus_root).expanduser().resolve()
+    corpus_root = Path(args.corpus_root).expanduser().resolve()
     transcript_root = Path(args.transcript_root).expanduser().resolve()
-    output_root     = Path(args.output_root).expanduser().resolve()
+    output_root = Path(args.output_root).expanduser().resolve()
 
     s = compute_stats(corpus_root, transcript_root, output_root)
 

@@ -37,7 +37,10 @@ def propose_thresholds(drifts):
         }
 
     gaps = sorted(
-        ((below[i + 1] - below[i], below[i], below[i + 1]) for i in range(len(below) - 1)),
+        (
+            (below[i + 1] - below[i], below[i], below[i + 1])
+            for i in range(len(below) - 1)
+        ),
         reverse=True,
     )
 
@@ -52,7 +55,8 @@ def propose_thresholds(drifts):
         f"(largest gap: {round(top_gap[0], 3)}% at {top_gap[1]:.3f}→{top_gap[2]:.3f}"
         + (
             f", second gap: {round(second_gap[0], 3)}% at {second_gap[1]:.3f}→{second_gap[2]:.3f}"
-            if second_gap else ""
+            if second_gap
+            else ""
         )
         + f"). Informational only — all sessions are processed regardless of drift magnitude."
     )
@@ -113,8 +117,18 @@ def format_seconds(value: float) -> str:
 
 
 def print_summary(rows):
-    headers = ["session_id", "dur_a(s)", "dur_b(s)", "delta(s)", "drift(%)", "ref", ">1%"]
-    widths = [max(len(str(row[i])) for row in rows + [headers]) for i in range(len(headers))]
+    headers = [
+        "session_id",
+        "dur_a(s)",
+        "dur_b(s)",
+        "delta(s)",
+        "drift(%)",
+        "ref",
+        ">1%",
+    ]
+    widths = [
+        max(len(str(row[i])) for row in rows + [headers]) for i in range(len(headers))
+    ]
     line = "  ".join(header.ljust(widths[i]) for i, header in enumerate(headers))
     print(line)
     print("  ".join("-" * widths[i] for i in range(len(headers))))
@@ -126,22 +140,40 @@ def main():
     parser = argparse.ArgumentParser(
         description="Stage 1 analysis: measure session durations and create parameter stubs."
     )
-    parser.add_argument("--corpus-root", required=True, help="Path to the CLARIN corpus root (contains WAV files).")
-    parser.add_argument("--transcript-root", default=None, help="Path to the v2 transcript root (for documentation; not used for filtering).")
-    parser.add_argument("--output-root", required=True, help="Path to the output root where session parameter files are written.")
+    parser.add_argument(
+        "--corpus-root",
+        required=True,
+        help="Path to the CLARIN corpus root (contains WAV files).",
+    )
+    parser.add_argument(
+        "--transcript-root",
+        default=None,
+        help="Path to the v2 transcript root (for documentation; not used for filtering).",
+    )
+    parser.add_argument(
+        "--output-root",
+        required=True,
+        help="Path to the output root where session parameter files are written.",
+    )
     args = parser.parse_args()
 
     corpus_root = Path(args.corpus_root).expanduser().resolve()
     output_root = Path(args.output_root).expanduser().resolve()
 
     if not corpus_root.exists() or not corpus_root.is_dir():
-        print(f"Error: corpus root not found or not a directory: {corpus_root}", file=sys.stderr)
+        print(
+            f"Error: corpus root not found or not a directory: {corpus_root}",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     if args.transcript_root:
         transcript_root = Path(args.transcript_root).expanduser().resolve()
         if not transcript_root.exists() or not transcript_root.is_dir():
-            print(f"Error: transcript root not found or not a directory: {transcript_root}", file=sys.stderr)
+            print(
+                f"Error: transcript root not found or not a directory: {transcript_root}",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
     sessions = find_session_pairs(corpus_root)
@@ -155,7 +187,10 @@ def main():
 
     for session_id, wavs in sorted(sessions.items()):
         if "a" not in wavs or "b" not in wavs:
-            print(f"Skipping session {session_id}: missing speaker_a or speaker_b WAV", file=sys.stderr)
+            print(
+                f"Skipping session {session_id}: missing speaker_a or speaker_b WAV",
+                file=sys.stderr,
+            )
             continue
 
         path_a = wavs["a"]
@@ -165,7 +200,9 @@ def main():
         delta = abs(duration_a - duration_b)
         reference_channel = "a" if duration_a >= duration_b else "b"
         reference_duration = max(duration_a, duration_b)
-        drift_percent = (delta / reference_duration) * 100 if reference_duration > 0 else 0.0
+        drift_percent = (
+            (delta / reference_duration) * 100 if reference_duration > 0 else 0.0
+        )
         above_1pct = drift_percent > 1.0
 
         params = {
@@ -188,25 +225,29 @@ def main():
         output_dir = output_root / session_id
         write_session_params(output_dir, session_id, params)
 
-        session_records.append({
-            "session_id": session_id,
-            "duration_a_sec": params["duration_a_sec"],
-            "duration_b_sec": params["duration_b_sec"],
-            "delta_sec": params["delta_sec"],
-            "drift_percent": params["drift_percent"],
-            "above_1pct_threshold": above_1pct,
-            "tier": params["tier"],
-        })
+        session_records.append(
+            {
+                "session_id": session_id,
+                "duration_a_sec": params["duration_a_sec"],
+                "duration_b_sec": params["duration_b_sec"],
+                "delta_sec": params["delta_sec"],
+                "drift_percent": params["drift_percent"],
+                "above_1pct_threshold": above_1pct,
+                "tier": params["tier"],
+            }
+        )
 
-        summary_rows.append([
-            session_id,
-            format_seconds(duration_a),
-            format_seconds(duration_b),
-            format_seconds(delta),
-            f"{drift_percent:.3f}",
-            reference_channel,
-            "YES" if above_1pct else "",
-        ])
+        summary_rows.append(
+            [
+                session_id,
+                format_seconds(duration_a),
+                format_seconds(duration_b),
+                format_seconds(delta),
+                f"{drift_percent:.3f}",
+                reference_channel,
+                "YES" if above_1pct else "",
+            ]
+        )
 
     if summary_rows:
         print_summary(summary_rows)
@@ -218,7 +259,7 @@ def main():
     n = len(drifts)
     mean_drift = sum(drifts) / n
     variance = sum((d - mean_drift) ** 2 for d in drifts) / n
-    std_drift = variance ** 0.5
+    std_drift = variance**0.5
 
     corpus_summary = {
         "pipeline_version": "1.0.0",
@@ -229,7 +270,9 @@ def main():
             "mean_drift_percent": round(mean_drift, 6),
             "std_drift_percent": round(std_drift, 6),
             "max_drift_percent": round(max(drifts), 6),
-            "sessions_above_1pct": sum(1 for r in session_records if r["above_1pct_threshold"]),
+            "sessions_above_1pct": sum(
+                1 for r in session_records if r["above_1pct_threshold"]
+            ),
         },
         "proposed_thresholds": propose_thresholds(drifts),
     }

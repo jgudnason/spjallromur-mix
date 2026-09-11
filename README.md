@@ -1,8 +1,38 @@
 # spjallromur-mix
 
-A pipeline for aligning and mixing the dual-channel recordings in the
-[Spjallrómur](https://clarin.is/en/resources/spjallromur/) conversational Icelandic corpus,
-and assembling the CLARIN v2 deposit directory.
+This repository provides **spjallromur-mix**, a pipeline for aligning and mixing the
+dual-channel recordings in the [Spjallrómur](https://clarin.is/en/resources/spjallromur/)
+conversational Icelandic corpus, and assembling the CLARIN deposit directory.
+
+![Python](https://img.shields.io/badge/python-3.11-blue?logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/python-3.12-blue?logo=python&logoColor=white)
+[![CI Status](https://github.com/icelandic-lt/spjallromur-mix/actions/workflows/ci.yml/badge.svg)](https://github.com/icelandic-lt/spjallromur-mix/actions/workflows/ci.yml)
+
+## Overview
+
+**spjallromur-mix** is part of the
+[Icelandic Language Technology Programme](https://github.com/icelandic-lt/icelandic-lt).
+
+- **Category:** [Tools / Data Curation](https://github.com/icelandic-lt/icelandic-lt/blob/main/doc/lr.md)
+- **Domain:** Laptop/Workstation
+- **Languages:** Python
+- **Language Version/Dialect:**
+  - Python: 3.11 - 3.12
+- **Audience**: Developers, Researchers
+- **Origins:** [Spjallrómur](https://clarin.is/en/resources/spjallromur/)
+
+## Status
+![Stable](https://img.shields.io/badge/Stable-green)
+
+## System Requirements
+
+- Operating system: Linux or macOS
+- Python 3.11 - 3.12
+- A local copy of the Spjallrómur CLARIN release and of the v2 transcript release
+  (neither is redistributed with this repository)
+- Roughly 10 GB of free disk space to assemble a full deposit
+
+## Description
 
 Each conversation is recorded locally on both sides of the call, producing two
 separate mono WAV files. Independent soundcard clocks cause the recordings to drift

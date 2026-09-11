@@ -37,9 +37,11 @@ PASSTHROUGH_DIRS = ()
 # the deposit today (PASSTHROUGH_DIRS is empty), but adding "docs" to it would
 # otherwise ship the pre-anonymisation annotation file.  Anything listed here is
 # skipped and reported, never silently dropped.
-EXCLUDED_FILENAMES = frozenset({
-    "manual_transcripts_original.json",  # pre-anonymisation originals; retained in the corpus, never deposited
-})
+EXCLUDED_FILENAMES = frozenset(
+    {
+        "manual_transcripts_original.json",  # pre-anonymisation originals; retained in the corpus, never deposited
+    }
+)
 
 # Top-level files copied from transcript_root.
 # LICENSE is NOT copied from transcript_root (which carries GPL v3 from the
@@ -89,7 +91,10 @@ METADATA_COLUMNS = [
 # Helpers
 # ---------------------------------------------------------------------------
 
-def find_clarin_wav_pairs(corpus_root: Path, conv_type: str) -> dict[str, dict[str, Path]]:
+
+def find_clarin_wav_pairs(
+    corpus_root: Path, conv_type: str
+) -> dict[str, dict[str, Path]]:
     """Return {session_id: {speaker: wav_path}} for CLARIN sessions of the given type."""
     sessions: dict[str, dict[str, Path]] = {}
     for wav in corpus_root.rglob("speaker_*_convo_*.wav"):
@@ -141,7 +146,9 @@ def stem_age_gender(stem: str) -> tuple[str, str]:
 
 
 def read_clarin_demographics(wav_path: Path, session_id: str, speaker: str) -> dict:
-    demo_path = wav_path.parent / f"speaker_{speaker}_convo_{session_id}_demographics.json"
+    demo_path = (
+        wav_path.parent / f"speaker_{speaker}_convo_{session_id}_demographics.json"
+    )
     if demo_path.exists():
         with demo_path.open(encoding="utf-8") as fh:
             return json.load(fh)
@@ -179,12 +186,15 @@ def write_metadata_tsv(path: Path, rows: list[dict]) -> None:
     with path.open("w", encoding="utf-8") as fh:
         fh.write("\t".join(METADATA_COLUMNS) + "\n")
         for row in rows:
-            fh.write("\t".join(str(row.get(col, "")) for col in METADATA_COLUMNS) + "\n")
+            fh.write(
+                "\t".join(str(row.get(col, "")) for col in METADATA_COLUMNS) + "\n"
+            )
 
 
 # ---------------------------------------------------------------------------
 # Full conversations processing
 # ---------------------------------------------------------------------------
+
 
 def process_full_conversations(
     corpus_root: Path,
@@ -211,7 +221,7 @@ def process_full_conversations(
         session_dir.mkdir(parents=True, exist_ok=True)
 
         params = read_session_params(output_root, session_id)
-        is_excluded = (params is not None and params.get("status") == "excluded")
+        is_excluded = params is not None and params.get("status") == "excluded"
 
         # Always copy session_params.json if it exists.
         src_params = output_root / session_id / "session_params.json"
@@ -223,9 +233,14 @@ def process_full_conversations(
         if is_excluded:
             stats["excluded"] += 1
             _append_metadata_rows(
-                metadata_rows, session_id, "full",
-                clarin_pairs[session_id], transcript_root, params,
-                has_mixed=False, audio_excluded=True,
+                metadata_rows,
+                session_id,
+                "full",
+                clarin_pairs[session_id],
+                transcript_root,
+                params,
+                has_mixed=False,
+                audio_excluded=True,
             )
             continue
 
@@ -276,9 +291,14 @@ def process_full_conversations(
             stats["warnings"].append(f"[{session_id}] no mixed WAV in deposit")
 
         _append_metadata_rows(
-            metadata_rows, session_id, "full",
-            clarin_pairs[session_id], transcript_root, params,
-            has_mixed=has_mixed, audio_excluded=False,
+            metadata_rows,
+            session_id,
+            "full",
+            clarin_pairs[session_id],
+            transcript_root,
+            params,
+            has_mixed=has_mixed,
+            audio_excluded=False,
         )
 
     return metadata_rows, stats
@@ -305,23 +325,26 @@ def _append_metadata_rows(
         demo = read_clarin_demographics(wav_map[spk], session_id, spk)
         duration = demo.get("duration_seconds", "")
 
-        rows.append({
-            "session_id": session_id,
-            "speaker": spk,
-            "age": age,
-            "gender": gender,
-            "duration_sec": duration,
-            "conversation_type": conv_type,
-            "has_mixed_audio": has_mixed,
-            "transcript_source": transcript_source,
-            "above_1pct_threshold": above_1pct,
-            "audio_excluded": audio_excluded,
-        })
+        rows.append(
+            {
+                "session_id": session_id,
+                "speaker": spk,
+                "age": age,
+                "gender": gender,
+                "duration_sec": duration,
+                "conversation_type": conv_type,
+                "has_mixed_audio": has_mixed,
+                "transcript_source": transcript_source,
+                "above_1pct_threshold": above_1pct,
+                "audio_excluded": audio_excluded,
+            }
+        )
 
 
 # ---------------------------------------------------------------------------
 # Half conversations processing
 # ---------------------------------------------------------------------------
+
 
 def process_half_conversations(
     corpus_root: Path,
@@ -353,9 +376,14 @@ def process_half_conversations(
             copy_file(jf, session_dir / jf.name)
 
         _append_metadata_rows(
-            metadata_rows, session_id, "half",
-            clarin_pairs[session_id], transcript_root,
-            params=None, has_mixed=False, audio_excluded=False,
+            metadata_rows,
+            session_id,
+            "half",
+            clarin_pairs[session_id],
+            transcript_root,
+            params=None,
+            has_mixed=False,
+            audio_excluded=False,
         )
 
     print(f"Processed half_conversations/: {len(clarin_pairs)} sessions")
@@ -366,14 +394,25 @@ def process_half_conversations(
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Assemble a complete CLARIN v2 deposit directory."
     )
-    parser.add_argument("--deposit-root", required=True, help="Where to write the deposit.")
-    parser.add_argument("--corpus-root", required=True, help="CLARIN corpus root (WAV files).")
-    parser.add_argument("--transcript-root", required=True, help="v2 transcript root (JSON files).")
-    parser.add_argument("--output-root", required=True, help="Pipeline output root (from analyse + synthesise).")
+    parser.add_argument(
+        "--deposit-root", required=True, help="Where to write the deposit."
+    )
+    parser.add_argument(
+        "--corpus-root", required=True, help="CLARIN corpus root (WAV files)."
+    )
+    parser.add_argument(
+        "--transcript-root", required=True, help="v2 transcript root (JSON files)."
+    )
+    parser.add_argument(
+        "--output-root",
+        required=True,
+        help="Pipeline output root (from analyse + synthesise).",
+    )
     args = parser.parse_args()
 
     deposit_root = Path(args.deposit_root).expanduser().resolve()
@@ -400,7 +439,9 @@ def main():
     )
 
     # 2. half_conversations (6 CLARIN sessions, built from WAVs + v2 transcripts)
-    half_metadata = process_half_conversations(corpus_root, transcript_root, deposit_root)
+    half_metadata = process_half_conversations(
+        corpus_root, transcript_root, deposit_root
+    )
 
     # 3. Passthrough directories from transcript_root
     for dirname in PASSTHROUGH_DIRS:
